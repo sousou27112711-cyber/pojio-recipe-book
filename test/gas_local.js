@@ -8,11 +8,13 @@ const ctx = {
 };
 vm.createContext(ctx); vm.runInContext(fs.readFileSync(file, 'utf8') + '\nthis.doPost = doPost; this.doGet = doGet;', ctx);
 const call = body => JSON.parse(ctx.doPost({ postData: { contents: JSON.stringify(body) } }).body);
-const show = (name, r, ok) => console.log((ok ? 'OK ' : 'NG ') + name + ' → ' + JSON.stringify(r));
-let r;
-r = call({ token, action: 'ping' }); show('正しい合言葉でping', r, r.ok === true && r.version === '3');
+const show = (name, r, ok) => { if (!ok) ng++; console.log((ok ? 'OK ' : 'NG ') + name + ' → ' + JSON.stringify(r)); };
+let r, ng = 0;
+const ver = (fs.readFileSync(file, 'utf8').match(/const VERSION = '([^']+)'/) || [])[1];
+r = call({ token, action: 'ping' }); show('正しい合言葉でping(版 ' + ver + ')', r, r.ok === true && r.version === ver);
 r = call({ token: 'wrong-token-xxxxxxxxxxxxxxxx', action: 'ping' }); show('違う合言葉', r, r.error === 'unauthorized');
 r = call({ token, action: 'nothing' }); show('知らない依頼', r, r.error === 'unknown_action');
 r = call({ token, action: 'fetch', url: 'http://localhost/x' }); show('内部向けURLは断る', r, r.error === 'bad_url');
 r = call({ token, action: 'fetch', url: 'https://www.instagram.com/p/ABC/' }); show('インスタは読まない', r, r.error === 'login_wall');
 r = JSON.parse(ctx.doGet().body); show('GET', r, r.ok === true);
+process.exitCode = ng ? 1 : 0;
