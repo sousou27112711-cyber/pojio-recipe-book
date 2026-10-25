@@ -64,10 +64,33 @@ def main() -> None:
         + '<link rel="apple-touch-icon" href="icon-180.png">\n'
         + reset
     )
-    sw_reg = (
-        "<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){"
-        "navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>\n"
-    )
+    # 新しい版が入ったら知らせて、タップで読み込み直す(使っている最中に勝手には読み込み直さない)
+    sw_reg = """<script>
+if ('serviceWorker' in navigator) {
+  var showUpdate = function () {
+    if (document.querySelector('.update-bar')) return;
+    var b = document.createElement('button');
+    b.className = 'update-bar'; b.type = 'button';
+    b.textContent = '新しい版になりました。タップで読み込み直す';
+    b.onclick = function () { location.reload(); };
+    document.body.appendChild(b);
+  };
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').then(function (reg) {
+      reg.addEventListener('updatefound', function () {
+        var w = reg.installing; if (!w) return;
+        w.addEventListener('statechange', function () { if (w.state === 'activated' && hadController) showUpdate(); });
+      });
+    }).catch(function () {});
+  });
+  var hadController = !!navigator.serviceWorker.controller;
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') return;
+    navigator.serviceWorker.getRegistration().then(function (r) { if (r) r.update(); }).catch(function () {});
+  });
+}
+</script>
+"""
     (DOCS / "index.html").write_text(pwa_head + "</head>\n<body>\n" + body + "\n" + sw_reg + "</body>\n</html>\n", encoding="utf-8")
 
     manifest = {

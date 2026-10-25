@@ -199,6 +199,8 @@ textarea{resize:vertical;min-height:96px}
 .code-input{width:100%;min-height:48px;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:0 12px;font-size:16px}
 .is-busy{opacity:.5;pointer-events:none}
 
+.update-bar{position:fixed;left:50%;transform:translateX(-50%);top:calc(10px + env(safe-area-inset-top,0px));z-index:50;max-width:calc(100% - 32px);padding:10px 16px;border:0;border-radius:999px;background:var(--accent);color:var(--accent-fg);font-size:14px;box-shadow:var(--shadow)}
+
 /* modes */
 .mode{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;background:var(--bg);padding-top:env(safe-area-inset-top,0px)}
 .mode-bar{flex:none;background:var(--bg);border-bottom:1px solid var(--line-soft)}
@@ -995,7 +997,7 @@ async function saveDraft(){
 }
 
 /* ---------- シート・確認・トースト ---------- */
-function openSheet(html){ $('#sheet-body').innerHTML = html; $('#sheet').hidden = false; lock(); }
+function openSheet(html){ $('#toast').hidden = true; $('#sheet-body').innerHTML = html; $('#sheet').hidden = false; lock(); }
 function closeSheet(){ $('#sheet').hidden = true; $('#sheet-body').innerHTML = ''; S.backupFile = null; unlock(); }
 function lock(){ document.documentElement.classList.add('locked'); }
 function unlock(){ if ($('#sheet').hidden && $('#shop').hidden && $('#cook').hidden) document.documentElement.classList.remove('locked'); }
@@ -1033,19 +1035,32 @@ function openAdd(pre){
   S.addGen = (S.addGen || 0) + 1; S.preparing = 0;
   S.addImgs = ((pre && (pre.imgs || (pre.img ? [pre.img] : []))) || []).slice(0, MAX_SHOTS);
   const auto = relayReady();
-  openSheet(sheetHead('レシピを追加') + '<div class="sheet-stack">' +
-    '<p class="hint">' + (auto ? 'レシピサイトのURLを貼ると、自動で読み込んで登録します。インスタは投稿のスクショを選んでください(10枚まで)。'
-      : 'インスタやサイトのURL、投稿の説明文を貼り付けてください。どちらか片方でも、両方まとめてでも大丈夫です。') + '欄を長押しすると「ペースト」が出ます。</p>' +
-    '<textarea id="add-text" rows="' + (auto ? 4 : 7) + '" placeholder="' + (auto ? 'https://www.kurashiru.com/recipes/…' : 'https://www.instagram.com/p/…&#10;【材料】2人分&#10;・ピーマン 4個&#10;【作り方】&#10;①ピーマンを細切りにする') + '">' + esc(pre && pre.text || '') + '</textarea>' +
-    pasteBtn('add-text') +
+  const shotPart = (open) =>
     '<div id="add-imgs">' + addImgsHTML() + '</div>' +
     '<label class="btn" for="add-file">' + ic('image') + 'スクショ・写真を選ぶ</label><input id="add-file" class="vh" type="file" accept="image/*"' + (auto ? ' multiple' : '') + '>' +
-    '<p class="hint">' + (auto ? '料理の写真は、スクショの中から自動で切り抜きます。全部の文字を読み取って、材料と作り方に分けます。' : '選んだ画像が料理の写真になります。') + '</p>' +
-    (auto ? '' : '<details class="howto"><summary>スクショの文字を写すには</summary><ol class="steps-guide"><li>写真アプリでスクショを開く</li><li>文字を長押しして選び、「コピー」</li><li>上の欄を長押しして「ペースト」</li></ol></details>') +
+    '<p class="hint">' + (auto ? '料理の写真はスクショの中から自動で切り抜き、文字を読み取って材料と作り方に分けます(10枚まで)。' : '選んだ画像が料理の写真になります。') + '</p>';
+  if (auto){
+    const hasShots = S.addImgs.length > 0;
+    openSheet(sheetHead('レシピを追加') + '<div class="sheet-stack">' +
+      '<p class="hint">レシピのURLを貼るだけで、自動で読み込んで登録します。</p>' +
+      (IN_FRAME ? '' : '<button class="btn btn-primary btn-block" data-act="paste-url">' + ic('clip') + 'コピーしたURLで登録</button>') +
+      '<textarea id="add-text" rows="2" placeholder="ここにURLを貼り付け(長押しで「ペースト」)">' + esc(pre && pre.text || '') + '</textarea>' +
+      '<p class="import-status" id="import-status" role="status" aria-live="polite" hidden></p>' +
+      '<button class="btn btn-block" data-act="add-go">取り込んで登録</button>' +
+      '<button class="btn btn-block" data-act="import-cancel" id="import-cancel" hidden>やめる</button>' +
+      '<details class="howto" id="shot-box"' + (hasShots ? ' open' : '') + '><summary>インスタなど、URLで読めないとき(スクショから)</summary><div class="sheet-stack">' + shotPart(hasShots) + '</div></details>' +
+      '<button class="text-btn" data-act="add-manual" style="align-self:center">何も貼らずに自分で入力する</button></div>');
+    return;
+  }
+  openSheet(sheetHead('レシピを追加') + '<div class="sheet-stack">' +
+    '<p class="hint">インスタやサイトのURL、投稿の説明文を貼り付けてください。どちらか片方でも、両方まとめてでも大丈夫です。欄を長押しすると「ペースト」が出ます。</p>' +
+    '<textarea id="add-text" rows="7" placeholder="https://www.instagram.com/p/…&#10;【材料】2人分&#10;・ピーマン 4個&#10;【作り方】&#10;①ピーマンを細切りにする">' + esc(pre && pre.text || '') + '</textarea>' +
+    pasteBtn('add-text') + shotPart(false) +
+    '<details class="howto"><summary>スクショの文字を写すには</summary><ol class="steps-guide"><li>写真アプリでスクショを開く</li><li>文字を長押しして選び、「コピー」</li><li>上の欄を長押しして「ペースト」</li></ol></details>' +
     '<p class="import-status" id="import-status" role="status" aria-live="polite" hidden></p>' +
-    '<button class="btn btn-primary btn-block" data-act="add-go">' + (auto ? '取り込んで登録' : '次へ') + '</button>' +
+    '<button class="btn btn-primary btn-block" data-act="add-go">次へ</button>' +
     '<button class="btn btn-block" data-act="import-cancel" id="import-cancel" hidden>やめる</button>' +
-    (auto ? '' : '<p class="hint">' + (IN_FRAME ? 'URLやスクショから自動で登録する機能は、本番のアプリで使えます。' : 'URLやスクショから自動で登録するには、右上の設定で「自動取り込み」を設定してください。') + '</p>') +
+    '<p class="hint">' + (IN_FRAME ? 'URLを貼るだけで自動で登録する機能は、本番のアプリで使えます。' : 'URLを貼るだけで自動で登録するには、右上の設定で「自動取り込み」を設定してください。') + '</p>' +
     '<button class="text-btn" data-act="add-manual" style="align-self:center">何も貼らずに自分で入力する</button></div>');
 }
 function goParse(text, img){
@@ -1144,9 +1159,10 @@ function maybeAutoFromPaste(){
   const v = ta.value.trim();
   if (!/^https?:\/\/[^\s　<>"'「」]+$/.test(v)) return;
   let host = ''; try { host = new URL(v).hostname; } catch (e) { return; }
-  if (LOGIN_WALL_RE.test(host)){ toast('インスタなどの投稿は、スクショを選んでから「取り込んで登録」を押してください'); return; }
+  if (LOGIN_WALL_RE.test(host)){ openShotBox(); toast('インスタの投稿はURLだけでは読めません。スクショを選んでから「取り込んで登録」を押してください'); return; }
   autoImport();
 }
+function openShotBox(){ const d = $('#shot-box'); if (d) d.open = true; }
 async function autoImport(){
   if (S.importing) return;
   if (S.preparing){ toast('画像を準備しています。少し待ってから押してください'); return; }
@@ -1155,7 +1171,7 @@ async function autoImport(){
   let host = ''; try { host = url ? new URL(url).hostname : ''; } catch (e) {}
   const wall = !!host && LOGIN_WALL_RE.test(host);
   if (!url && !imgs.length && !text.trim()){ toast('URLか文章を貼り付けるか、スクショを選んでください'); return; }
-  if (wall && !imgs.length && !p0.ingredients.length && !p0.steps.length){ toast('インスタなどの投稿は、スクショを選んでください'); return; }
+  if (wall && !imgs.length && !p0.ingredients.length && !p0.steps.length){ openShotBox(); toast('インスタの投稿はURLだけでは読めません。スクショを選んでください'); return; }
   const op = importOp = { ctrl: new AbortController(), cancelled: false };
   S.importing = true; setImportBusy(true);
   try { await runImport(op, text, imgs, url, wall); }
@@ -1212,13 +1228,12 @@ async function runImport(op, text, imgs, url, wall){
       img: image, imgDirty: !!image, rawText: combined, notice });
   };
   if (failedShots.length) return toEdit(failedShots.join('・') + '枚目のスクショを読み取れませんでした(' + problems[problems.length - 1] + ')。読み取れた分を入れたので、確かめて保存してください。');
-  if (!hasBody){
-    if (site && site.title) return toEdit('料理名と写真は読み込めましたが、材料と作り方は読み取れませんでした。確かめて保存してください。');
-    return toEdit((problems[0] ? problems[0] + '。' : '') + '自動では読み取れなかったので、入れられるところを入れて保存してください。');
-  }
+  if (!hasBody && !(site && site.title)) return toEdit((problems[0] ? problems[0] + '。' : '') + '自動では読み取れなかったので、入れられるところを入れて保存してください。');
   const r = { id: uid(), sample: false, title, sourceUrl: cleanUrl(url) || '', servings, ingredients, steps, rating: 0, memo: '', cooked: [], shopChecked: [],
     thumb: image ? image.thumb : '', rawText: combined, createdAt: new Date().toISOString() };
-  const notes = { main: '自動で登録しました', missing: !ingredients.length ? '材料は読み取れませんでした' : (!steps.length ? '作り方は読み取れませんでした' : ''), unnamed: !named };
+  const notes = hasBody
+    ? { main: '自動で登録しました', missing: !ingredients.length ? '材料は読み取れませんでした' : (!steps.length ? '作り方は読み取れませんでした' : ''), unnamed: !named }
+    : { main: image ? '料理名と写真を登録しました' : '料理名を登録しました', missing: '材料と作り方はページから読み取れませんでした', unnamed: false };
   const dupOf = r.sourceUrl && S.recipes.find(o => o.sourceUrl === r.sourceUrl);
   if (dupOf){
     openConfirm('このリンクのレシピはもう入っています', '「' + dupOf.title + '」として登録済みです。もう1つ登録しますか?', 'もう1つ登録する',
@@ -1455,7 +1470,7 @@ function openSettings(){
     relaySectionHTML() +
     (samples ? '<section class="set-sec"><h3>見本のレシピ</h3><p class="hint">見本が' + samples + '品入っています。自分のレシピを入れたら消してください。</p><button class="btn btn-block" data-act="del-samples">見本を消す</button></section>' : '') +
     (DB.mode === 'mem' ? '<p class="hint">この画面ではレシピを保存できません。</p>' : '') +
-    '<p class="ver">ぽじおレシピブック 試作版 v0.5</p>');
+    '<p class="ver">ぽじおレシピブック 試作版 v0.6</p>');
   const u = $('#usage');
   try {
     if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(e => { if (u) u.textContent = '約' + ((e.usage || 0) / 1048576).toFixed(1) + 'MB'; }).catch(() => { if (u) u.textContent = '不明'; });
@@ -1535,6 +1550,14 @@ const ACT = {
   },
   'add-img-del': el => { S.addImgs.splice(Number(el.dataset.i), 1); $('#add-imgs').innerHTML = addImgsHTML(); queueDraft(); },
   'import-cancel': () => cancelImport(),
+  'paste-url': async () => {
+    const ta = $('#add-text');
+    let t = '';
+    try { t = (await navigator.clipboard.readText() || '').trim(); }
+    catch (e) { toast('下の欄を長押しして「ペースト」を選んでください'); return; }
+    if (!/^https?:\/\//.test(t)){ toast('コピーされているのはURLではないようです'); return; }
+    ta.value = t; queueDraft(); maybeAutoFromPaste();
+  },
   'paste-clip': async el => {
     const ta = $('#' + el.dataset.t);
     try { const t = await navigator.clipboard.readText(); if (t){ ta.value = ta.value ? ta.value.replace(/\s+$/, '') + '\n' + t : t; queueDraft(); if (ta.id === 'add-text') maybeAutoFromPaste(); } }
@@ -1694,6 +1717,30 @@ init();
 })();
 </script>
 
-<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
+<script>
+if ('serviceWorker' in navigator) {
+  var showUpdate = function () {
+    if (document.querySelector('.update-bar')) return;
+    var b = document.createElement('button');
+    b.className = 'update-bar'; b.type = 'button';
+    b.textContent = '新しい版になりました。タップで読み込み直す';
+    b.onclick = function () { location.reload(); };
+    document.body.appendChild(b);
+  };
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').then(function (reg) {
+      reg.addEventListener('updatefound', function () {
+        var w = reg.installing; if (!w) return;
+        w.addEventListener('statechange', function () { if (w.state === 'activated' && hadController) showUpdate(); });
+      });
+    }).catch(function () {});
+  });
+  var hadController = !!navigator.serviceWorker.controller;
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible') return;
+    navigator.serviceWorker.getRegistration().then(function (r) { if (r) r.update(); }).catch(function () {});
+  });
+}
+</script>
 </body>
 </html>

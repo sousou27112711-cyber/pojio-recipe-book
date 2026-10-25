@@ -72,12 +72,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await click('[data-act="confirm-cancel"]');
   log.push('2) 入っている方を開く: ' + await ev(`document.querySelector('.d-title').textContent`) + ' / 件数 ' + await ev(`(document.querySelector('[data-act="back"]').click(), document.querySelector('#count').textContent)`));
 
-  // 3) 料理名と画像だけのサイト → 編集画面で確認
+  // 3) 料理名と画像だけのサイト → URLを貼っただけで登録(材料と作り方は読めなかったと知らせる)
   await click('[data-act="add"]');
+  log.push('3) 追加画面: 主ボタン=' + await ev(`document.querySelector('[data-act="paste-url"]')?.textContent`) + ' / スクショ欄は閉じている=' + await ev(`!document.querySelector('#shot-box').open`));
+  await shot('31_add_url_first.png');
   await paste(siteUrl('sirogohan'));
-  await waitFor(inEdit);
-  log.push('3) 白ごはん.com: 料理名=' + await ev(`document.querySelector('#f-title').value`) + ' / 画像 ' + await ev(`!!document.querySelector('#img-prev img')`) + ' / ' + await ev(`document.querySelector('.edit .note').textContent`));
-  await click('[data-act="edit-cancel"]');
+  await waitFor(inDetail);
+  log.push('3) 白ごはん.com: ' + await detailSummary() + ' / ' + await toastText());
+  await click('[data-act="back"]');
 
   // 4) 読み込み中に「やめる」
   await click('[data-act="add"]');
@@ -91,7 +93,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await ev(`document.querySelector('#add-text').value=''`);
   await paste('https://www.instagram.com/p/ABC123/');
   await sleep(300);
-  log.push('5) インスタURLだけ: ' + await toastText());
+  log.push('5) インスタURLだけ: ' + await toastText() + ' / スクショ欄が開いた=' + await ev(`document.querySelector('#shot-box').open`));
   await pickShots(1);
   log.push('5) 追加画面の印: ' + await ev(`document.querySelector('#add-imgs .thumb-tag')?.textContent`));
   await shot('21_add_shot.png');
