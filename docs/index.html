@@ -701,7 +701,7 @@ function backupNudge(){
 function renderNotes(){
   const n = [];
   if (S.pendingDraft) n.push('<div class="note warn">書きかけのレシピがあります。<div class="note-row"><button class="btn sm btn-primary" data-act="draft-resume">続ける</button><button class="btn sm" data-act="draft-discard">捨てる</button></div></div>');
-  if (!IN_FRAME && !STANDALONE) n.push('<p class="note warn">いまSafariで開いています。下の共有ボタンから「ホーム画面に追加」をして、ホーム画面のアイコンから開いてください。Safariとホーム画面のアプリでは、レシピが別々に保存されます。</p>');
+  if (!IN_FRAME && !STANDALONE) n.push('<p class="note warn">いまブラウザで開いています。共有ボタン(Safariは画面の下、Chromeはアドレス欄の右)から「ホーム画面に追加」をして、ホーム画面のアイコンから開いてください。ブラウザとホーム画面のアプリでは、レシピが別々に保存されます。</p>');
   const b = backupNudge(); if (b) n.push('<p class="note">' + esc(b) + '</p>');
   if (S.recipes.some(r => r.sample)) n.push('<p class="note">見本のレシピが入っています。右上の設定から消せます。</p>');
   $('#notes').innerHTML = n.join('');
@@ -1102,7 +1102,7 @@ function openSettings(){
     '</section>' +
     (samples ? '<section class="set-sec"><h3>見本のレシピ</h3><p class="hint">見本が' + samples + '品入っています。自分のレシピを入れたら消してください。</p><button class="btn btn-block" data-act="del-samples">見本を消す</button></section>' : '') +
     (DB.mode === 'mem' ? '<p class="hint">この画面ではレシピを保存できません。</p>' : '') +
-    '<p class="ver">ぽじおレシピブック 試作版 v0.3</p>');
+    '<p class="ver">ぽじおレシピブック 試作版 v0.3.1</p>');
   const u = $('#usage');
   try {
     if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(e => { if (u) u.textContent = '約' + ((e.usage || 0) / 1048576).toFixed(1) + 'MB'; }).catch(() => { if (u) u.textContent = '不明'; });
