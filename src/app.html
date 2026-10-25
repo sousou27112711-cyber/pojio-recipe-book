@@ -1096,7 +1096,8 @@ const SITE_IMG_RE = /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/
 const MAX_SHOTS = 10;
 const relayReady = () => !IN_FRAME && !!(S.relay && S.relay.url && S.relay.token);
 function parseRelayCode(code){
-  const m = String(code || '').trim().match(/^(https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec)#([A-Za-z0-9_-]{16,})$/);
+  // LINEのメッセージを丸ごと貼っても、中から設定コードだけを拾う
+  const m = String(code || '').match(/(https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec)#([A-Za-z0-9_-]{16,})/);
   return m ? { url: m[1], token: m[2] } : null;
 }
 async function callRelay(body, opts){
@@ -1486,7 +1487,7 @@ function openSettings(){
     relaySectionHTML() +
     (samples ? '<section class="set-sec"><h3>見本のレシピ</h3><p class="hint">見本が' + samples + '品入っています。自分のレシピを入れたら消してください。</p><button class="btn btn-block" data-act="del-samples">見本を消す</button></section>' : '') +
     (DB.mode === 'mem' ? '<p class="hint">この画面ではレシピを保存できません。</p>' : '') +
-    '<p class="ver">ぽじおレシピブック 試作版 v0.7.1</p>');
+    '<p class="ver">ぽじおレシピブック 試作版 v0.7.2</p>');
   const u = $('#usage');
   try {
     if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(e => { if (u) u.textContent = '約' + ((e.usage || 0) / 1048576).toFixed(1) + 'MB'; }).catch(() => { if (u) u.textContent = '不明'; });
