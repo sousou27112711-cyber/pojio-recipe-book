@@ -187,6 +187,18 @@ textarea{resize:vertical;min-height:96px}
 .ver{margin:8px 0 0;color:var(--muted);font-size:12px;text-align:center}
 .confirm-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 
+.thumbs{display:flex;gap:8px;overflow-x:auto;padding:2px 0}
+.thumb{position:relative;flex:none;width:84px;height:84px;border-radius:14px;overflow:hidden;background:var(--surface-2)}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb-tag{position:absolute;left:6px;bottom:6px;padding:1px 7px;border-radius:999px;background:var(--img-chip-bg);color:var(--img-chip-fg);font-size:11px}
+.thumb-del{position:absolute;top:4px;right:4px;display:grid;place-items:center;width:28px;height:28px;padding:0;border:0;border-radius:50%;background:var(--img-chip-bg);color:var(--img-chip-fg)}
+.thumb-del .ic{width:16px;height:16px}
+.import-status{margin:0;padding:10px 14px;border-radius:12px;background:var(--accent-soft);font-size:14px;display:flex;align-items:center;gap:10px}
+.import-status::before{content:"";flex:none;width:16px;height:16px;border-radius:50%;border:2px solid var(--accent);border-right-color:transparent;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.code-input{width:100%;min-height:48px;border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:0 12px;font-size:16px}
+.is-busy{opacity:.5;pointer-events:none}
+
 /* modes */
 .mode{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;background:var(--bg);padding-top:env(safe-area-inset-top,0px)}
 .mode-bar{flex:none;background:var(--bg);border-bottom:1px solid var(--line-soft)}
@@ -282,6 +294,7 @@ const CIRCLED = '①-⑳❶-❿➀-➉⓵-⓾';
 const STEP_NUM_RE = new RegExp('^(?:(?:step|ステップ)\\s*[0-9０-９]{1,2}\\s*[.．。、,，:：)）]?\\s*|[' + CIRCLED + '](?![のをにとがはへで])\\s*|[(（]\\s*[0-9０-９]{1,2}\\s*[)）]\\s*|[0-9０-９]{1,2}\\s*(?:[.．](?![0-9０-９])|[。、,，:：)）]|\\s)\\s*)', 'i');
 const MULTI_STEP_RE = new RegExp('(?<!^)(?=[' + CIRCLED + '](?![のをにとがはへで]))', 'g');
 const STEPLIKE_END_RE = /(る|す|た|て|ます|ください|しょう)[。．!！]?$/;
+const AMOUNT_ONLY_RE = new RegExp('^(?:(?:大さじ|小さじ|大匙|小匙|カップ|大|小)\\s*[0-9０-９½¼¾⅓⅔][0-9０-９½¼¾⅓⅔/／.と〜~]*|[0-9０-９½¼¾⅓⅔][0-9０-９½¼¾⅓⅔/／.〜~]*\\s*(?:' + UNITS + ')|' + QTY_WORDS + ')(?:\\s*[（(][^）)]*[）)])?$');
 const CTA_RE = /(保存して(?:ね|あとで|後で|見返)|あとで見返|後で見返|保存必須|保存版|必見|ブックマーク|フォロー|いいね|コメント(?:で|して|ください|欄)|プロフ|ハイライト|リンクから|DMで|作ったら教えて|参考になったら)/;
 
 function toHalf(s){ return String(s).replace(/[０-９Ａ-Ｚａ-ｚ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)); }
@@ -343,8 +356,24 @@ function pickTitle(lines){
     if (!s || s.length > 40 || /^[^\p{L}\p{N}]+$/u.test(s)) continue;
     cands.push({ s, deco });
   }
-  const plain = cands.find(c => !c.deco);
-  return (plain || cands[0] || { s: '' }).s;
+  const ja = c => /[぀-ヿ一-鿿]/.test(c.s);
+  const pick = cands.find(c => !c.deco && ja(c)) || cands.find(c => ja(c)) || cands.find(c => !c.deco) || cands[0];
+  return pick ? pick.s : '';
+}
+// スクショの文字読み取り結果から、インスタの画面の文字(時刻・いいね数・ユーザー名など)を外す
+const UI_LINE_RE = /^(投稿|リール|フォロー中?|フォローする|メッセージ|いいね！?|返信する?|翻訳を見る|もっと見る|続きを読む|その他|シェア|保存|共有|検索|ホーム|プロフィール|広告|おすすめ|Instagram|オリジナル音源.*|.*さん(など)?が「?いいね.*|.*件のコメントを(すべて)?見る|コメントを追加.*)$/;
+const USER_RE = /^(?=[A-Za-z0-9._]*[A-Za-z]{2})(?=[A-Za-z0-9._]*[._])[A-Za-z0-9._]{3,30}$/;
+function cleanOcrText(text){
+  return String(text || '').replace(/\r\n?/g, '\n').split('\n').map(l => l.trim()).filter(l => {
+    if (!l) return true;
+    if (/^[0-9０-９]{1,2}[:：][0-9０-９]{2}$/.test(l)) return false;
+    if (/^[0-9０-９]{1,3}([,，][0-9０-９]{3})+$|^[0-9０-９]{4,}$/.test(l)) return false;
+    if (/^[♡♥❤]\s*[0-9０-９,，.]+\s*(万|千)?\s*(件|回)?$/.test(l) || /^[0-9０-９,，.]+\s*(万|千)?\s*件$/.test(l)) return false;
+    if (/^[0-9０-９]+\s*(秒|分|時間|日|週間|か月|ヶ月|年)前$/.test(l)) return false;
+    if (/^[0-9０-９]{1,2}月[0-9０-９]{1,2}日$/.test(l)) return false;
+    if (UI_LINE_RE.test(l) || USER_RE.test(l)) return false;
+    return true;
+  }).map(l => l.replace(/^(?=[A-Za-z0-9._]*[A-Za-z]{2})(?=[A-Za-z0-9._]*[._])[A-Za-z0-9._]{3,30}\s+(?=[^\x00-\x7F])/, '')).join('\n');
 }
 function parseRecipeText(input){
   const out = { url: '', title: '', servings: '', ingredients: [], steps: [] };
@@ -383,6 +412,10 @@ function parseRecipeText(input){
     if (mode === 'ing'){
       if (isServingsOnly(clean)){ if (!out.servings) out.servings = servingsOf(clean); continue; }
       if ((isNumbered(clean) && !AMOUNT_RE.test(clean.slice(0, 4))) || isStepLike(clean)){ mode = 'step'; numbered = false; gap = false; addStep(clean); continue; }
+      if (AMOUNT_ONLY_RE.test(clean) && out.ingredients.length){
+        const i = out.ingredients.length - 1, prev = out.ingredients[i];
+        if (!/^【/.test(prev) && !AMOUNT_RE.test(prev)){ out.ingredients[i] = prev + ' ' + normIngredient(clean); continue; }
+      }
       const g = asGroupHeading(clean);
       if (g){ out.ingredients.push('【' + g + '】'); continue; }
       const ni = normIngredient(raw);
@@ -494,7 +527,7 @@ const DB = (() => {
   };
 })();
 
-const S = { recipes: [], sort: 'added', q: '', view: 'list', currentId: null, listScroll: 0, draft: null, addImg: null, cook: null, cookStep: {}, wake: 'off', lastBackup: null, backupFile: null, importPlan: null, pendingDraft: null, toastRun: null };
+const S = { recipes: [], sort: 'added', q: '', view: 'list', currentId: null, listScroll: 0, draft: null, addImgs: [], addGen: 0, preparing: 0, relay: null, importing: false, cook: null, cookStep: {}, wake: 'off', lastBackup: null, backupFile: null, importPlan: null, pendingDraft: null, toastRun: null };
 const getR = id => S.recipes.find(r => r.id === id);
 async function saveR(r){
   r.updatedAt = new Date().toISOString();
@@ -554,11 +587,24 @@ function squared(src, size, q){
   c.getContext('2d').drawImage(src, sx, sy, s, s, 0, 0, size, size);
   return c.toDataURL('image/jpeg', q);
 }
-async function fileToImages(file){
+async function fileToImages(file, withOcr){
   const bmp = await loadBitmap(file);
   const out = { full: scaled(bmp, 1280, 0.82), thumb: squared(bmp, 420, 0.8) };
+  if (withOcr) out.ocr = forOcr(bmp);
   if (bmp.close) bmp.close();
   return out;
+}
+// 文字読み取り用。小さい字がつぶれないよう、幅1400・高さ3600までに収める
+function forOcr(src){
+  const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+  const k = Math.min(1, 1400 / w, 3600 / h);
+  const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+  const g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(src, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.88);
+}
+async function dataUrlToImages(dataUrl){
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('img')); i.src = dataUrl; });
+  return { full: scaled(img, 1280, 0.82), thumb: squared(img, 420, 0.8) };
 }
 function hueOf(s){ let h = 0; for (const ch of String(s)) h = (h * 31 + ch.codePointAt(0)) % 360; return h; }
 const phHTML = title => '<span class="ph" style="--h:' + hueOf(title) + '" aria-hidden="true">' + esc(Array.from(title || '?')[0] || '?') + '</span>';
@@ -648,13 +694,13 @@ function draftSnapshot(){
       ingredientsText: $('#f-ing').value, stepsText: $('#f-steps').value, img: x.img, imgDirty: x.imgDirty, thumb: x.thumb, rawText: x.rawText, notice: x.notice };
   }
   const ta = $('#add-text');
-  if (ta && !$('#sheet').hidden) return { kind: 'add', text: ta.value, img: S.addImg };
+  if (ta && !$('#sheet').hidden) return { kind: 'add', text: ta.value, imgs: S.addImgs };
   return null;
 }
 function flushDraft(){
   clearTimeout(draftTimer);
   const d = draftSnapshot(); if (!d) return;
-  if (d.kind === 'add' && !d.text.trim() && !d.img) return;
+  if (d.kind === 'add' && !d.text.trim() && !(d.imgs && d.imgs.length)) return;
   d.at = Date.now();
   DB.put('meta', { key: 'draft', value: d }).catch(() => {});
 }
@@ -871,10 +917,17 @@ function closeSheet(){ $('#sheet').hidden = true; $('#sheet-body').innerHTML = '
 function lock(){ document.documentElement.classList.add('locked'); }
 function unlock(){ if ($('#sheet').hidden && $('#shop').hidden && $('#cook').hidden) document.documentElement.classList.remove('locked'); }
 const sheetHead = t => '<div class="sheet-head"><h2>' + t + '</h2><button class="icon-btn" data-act="sheet-close" aria-label="閉じる">' + ic('x') + '</button></div>';
-let confirmRun = null;
-function openConfirm(title, body, okLabel, run, danger){
-  confirmRun = run;
-  openSheet(sheetHead(esc(title)) + '<div class="sheet-stack"><p class="hint">' + esc(body) + '</p><div class="confirm-actions"><button class="btn" data-act="sheet-close">やめる</button><button class="btn ' + (danger ? 'btn-danger-solid' : 'btn-primary') + '" data-act="confirm-ok">' + esc(okLabel) + '</button></div></div>');
+let confirmRun = null, confirmCancel = null;
+function openConfirm(title, body, okLabel, run, danger, cancel){
+  confirmRun = run; confirmCancel = cancel && cancel.run ? cancel.run : null;
+  openSheet(sheetHead(esc(title)) + '<div class="sheet-stack"><p class="hint">' + esc(body) + '</p><div class="confirm-actions"><button class="btn" data-act="confirm-cancel">' + esc(cancel && cancel.label || 'やめる') + '</button><button class="btn ' + (danger ? 'btn-danger-solid' : 'btn-primary') + '" data-act="confirm-ok">' + esc(okLabel) + '</button></div></div>');
+}
+// シートを閉じる操作はすべてここを通す(取り込み中なら止める)
+function dismissSheet(){
+  if (S.importing) cancelImport();
+  if (relayCheck) relayCheck.abort();
+  if ($('#add-text')) clearDraft();
+  closeSheet();
 }
 let toastTimer = null;
 function toast(msg, action){
@@ -888,26 +941,241 @@ function toast(msg, action){
 
 /* ---------- 追加 ---------- */
 const pasteBtn = target => IN_FRAME ? '' : '<button class="btn" data-act="paste-clip" data-t="' + target + '">' + ic('clip') + 'コピーした内容を貼り付け</button>';
+function addImgsHTML(){
+  if (!S.addImgs.length) return '<div class="img-prev sm">画像なし</div>';
+  return '<div class="thumbs">' + S.addImgs.map((im, i) => '<div class="thumb">' + imgTag(im.thumb) + (i === 0 ? '<span class="thumb-tag">写真</span>' : '') +
+    '<button class="thumb-del" data-act="add-img-del" data-i="' + i + '" aria-label="' + (i + 1) + '枚目を外す">' + ic('x') + '</button></div>').join('') + '</div>';
+}
 function openAdd(pre){
-  S.addImg = (pre && pre.img) || null;
+  S.addGen = (S.addGen || 0) + 1; S.preparing = 0;
+  S.addImgs = ((pre && (pre.imgs || (pre.img ? [pre.img] : []))) || []).slice(0, MAX_SHOTS);
+  const auto = relayReady();
   openSheet(sheetHead('レシピを追加') + '<div class="sheet-stack">' +
-    '<p class="hint">インスタやサイトのURL、投稿の説明文を貼り付けてください。どちらか片方でも、両方まとめてでも大丈夫です。欄を長押しすると「ペースト」が出ます。</p>' +
-    '<textarea id="add-text" rows="7" placeholder="https://www.instagram.com/p/…&#10;【材料】2人分&#10;・ピーマン 4個&#10;【作り方】&#10;①ピーマンを細切りにする">' + esc(pre && pre.text || '') + '</textarea>' +
+    '<p class="hint">' + (auto ? 'レシピサイトのURLを貼ると、自動で読み込んで登録します。インスタは投稿のスクショを選んでください(10枚まで)。'
+      : 'インスタやサイトのURL、投稿の説明文を貼り付けてください。どちらか片方でも、両方まとめてでも大丈夫です。') + '欄を長押しすると「ペースト」が出ます。</p>' +
+    '<textarea id="add-text" rows="' + (auto ? 4 : 7) + '" placeholder="' + (auto ? 'https://www.kurashiru.com/recipes/…' : 'https://www.instagram.com/p/…&#10;【材料】2人分&#10;・ピーマン 4個&#10;【作り方】&#10;①ピーマンを細切りにする') + '">' + esc(pre && pre.text || '') + '</textarea>' +
     pasteBtn('add-text') +
-    '<div class="img-pick"><div class="img-prev sm" id="add-prev">' + (S.addImg ? imgTag(S.addImg.thumb) : '画像なし') + '</div>' +
-      '<div class="img-actions"><label class="btn" for="add-file">' + ic('image') + 'スクショ・写真を選ぶ</label><input id="add-file" class="vh" type="file" accept="image/*"><span class="hint">選んだ画像が料理の写真になります</span></div></div>' +
-    '<details class="howto"><summary>スクショの文字を写すには</summary><ol class="steps-guide"><li>写真アプリでスクショを開く</li><li>文字を長押しして選び、「コピー」</li><li>上の欄を長押しして「ペースト」</li></ol></details>' +
-    '<button class="btn btn-primary btn-block" data-act="add-go">次へ</button>' +
+    '<div id="add-imgs">' + addImgsHTML() + '</div>' +
+    '<label class="btn" for="add-file">' + ic('image') + 'スクショ・写真を選ぶ</label><input id="add-file" class="vh" type="file" accept="image/*"' + (auto ? ' multiple' : '') + '>' +
+    '<p class="hint">' + (auto ? '1枚目が料理の写真になります。全部の文字を読み取って、材料と作り方に分けます。' : '選んだ画像が料理の写真になります。') + '</p>' +
+    (auto ? '' : '<details class="howto"><summary>スクショの文字を写すには</summary><ol class="steps-guide"><li>写真アプリでスクショを開く</li><li>文字を長押しして選び、「コピー」</li><li>上の欄を長押しして「ペースト」</li></ol></details>') +
+    '<p class="import-status" id="import-status" role="status" aria-live="polite" hidden></p>' +
+    '<button class="btn btn-primary btn-block" data-act="add-go">' + (auto ? '取り込んで登録' : '次へ') + '</button>' +
+    '<button class="btn btn-block" data-act="import-cancel" id="import-cancel" hidden>やめる</button>' +
+    (auto ? '' : '<p class="hint">' + (IN_FRAME ? 'URLやスクショから自動で登録する機能は、本番のアプリで使えます。' : 'URLやスクショから自動で登録するには、右上の設定で「自動取り込み」を設定してください。') + '</p>') +
     '<button class="text-btn" data-act="add-manual" style="align-self:center">何も貼らずに自分で入力する</button></div>');
 }
 function goParse(text, img){
   const p = parseRecipeText(text);
   const body = p.ingredients.length || p.steps.length;
   const notice = body ? '自動で分けました。内容を確かめてから保存してください。'
-    : (p.url ? 'リンクを入れました。料理名を入れて保存してください。サイトから自動で読み込む機能は次の版で付けます。' : '');
+    : (p.url ? 'リンクを入れました。料理名を入れて保存してください。' : '');
   closeSheet();
   showEdit({ title: p.title, sourceUrl: p.url, servings: p.servings, ingredientsText: p.ingredients.join('\n'), stepsText: p.steps.join('\n'),
     img: img || null, imgDirty: !!img, rawText: String(text || '').trim() && (body || p.title) ? String(text).trim() : '', notice });
+}
+
+/* ---------- 自動取り込み(取り込み係 = 自分のGoogleアカウントのApps Script) ---------- */
+const LOGIN_WALL_RE = /(^|\.)(instagram\.com|facebook\.com|x\.com|twitter\.com|threads\.net)$/i;
+const URL_IN_TEXT_RE = /https?:\/\/[^\s　<>"'「」]+/;
+const SITE_IMG_RE = /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+const MAX_SHOTS = 10;
+const relayReady = () => !IN_FRAME && !!(S.relay && S.relay.url && S.relay.token);
+function parseRelayCode(code){
+  const m = String(code || '').trim().match(/^(https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec)#([A-Za-z0-9_-]{16,})$/);
+  return m ? { url: m[1], token: m[2] } : null;
+}
+async function callRelay(body, opts){
+  opts = opts || {};
+  const cfg = opts.cfg || S.relay, ctrl = opts.ctrl || new AbortController();
+  let timedOut = false;
+  const tm = setTimeout(() => { timedOut = true; ctrl.abort(); }, opts.timeout || 90000);
+  try {
+    const res = await fetch(cfg.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ token: cfg.token }, body)), signal: ctrl.signal });
+    if (!res.ok) return { ok: false, error: 'relay_http_' + res.status };
+    const data = await res.json().catch(() => null);
+    if (!data || typeof data !== 'object' || typeof data.ok !== 'boolean') return { ok: false, error: 'bad_response' };
+    return data;
+  } catch (e) {
+    if (e && e.name === 'AbortError') return { ok: false, error: timedOut ? 'timeout' : 'aborted' };
+    return { ok: false, error: 'network' };
+  } finally { clearTimeout(tm); }
+}
+const RELAY_ERR = {
+  unauthorized: '設定コードが合っていないようです。設定の「自動取り込み」から入れ直してください',
+  not_configured: '取り込み係に合言葉が入っていません',
+  rate_limited: '短い時間に使いすぎたため、取り込み係が休んでいます。しばらくしてから試してください',
+  login_wall: 'このSNSのページは読み込めません。投稿のスクショを選んでください',
+  network: '取り込み係につながりませんでした。電波を確かめてください',
+  timeout: '時間内に結果を受け取れませんでした。電波のよいところでもう一度試してください',
+  bad_response: '取り込み係から読めない返事が届きました',
+  bad_url: 'URLの形になっていないか、読み込めない種類のURLです',
+  bad_redirect: 'ページの転送先を読み込めませんでした',
+  too_many_redirects: 'ページの転送先を読み込めませんでした',
+  blocked_page: 'このサイトには読み込みを断られました',
+  not_html: 'このURLはレシピのページではないようです',
+  too_large: 'ページか画像が大きすぎて読み込めませんでした',
+  bad_image: 'この画像は読み取れませんでした',
+};
+function relayErrText(err){
+  if (RELAY_ERR[err]) return RELAY_ERR[err];
+  if (/^http_4/.test(err)) return 'このサイトには読み込みを断られました';
+  if (/^http_5|^relay_http/.test(err)) return 'サイトか取り込み係が、うまく応えませんでした';
+  return '読み込みに失敗しました';
+}
+const strList = a => Array.isArray(a) ? a.filter(x => typeof x === 'string' && x.trim()).slice(0, 80).map(x => x.trim().slice(0, 400)) : [];
+function checkSite(r){
+  return {
+    found: r.found === true,
+    title: typeof r.title === 'string' ? r.title.trim().slice(0, 200) : '',
+    servings: typeof r.servings === 'string' ? r.servings.trim().slice(0, 40) : '',
+    ingredients: strList(r.ingredients), steps: strList(r.steps),
+    image: typeof r.image === 'string' && r.image.length < 12e6 && SITE_IMG_RE.test(r.image) ? r.image : '',
+  };
+}
+async function dataUrlToImages(dataUrl){
+  if (!SITE_IMG_RE.test(dataUrl)) throw new Error('img');
+  const img = await new Promise((res, rej) => {
+    const i = new Image(), tm = setTimeout(() => rej(new Error('timeout')), 15000);
+    i.onload = () => { clearTimeout(tm); res(i); }; i.onerror = () => { clearTimeout(tm); rej(new Error('img')); };
+    i.src = dataUrl;
+  });
+  if (img.naturalWidth * img.naturalHeight > 40e6) throw new Error('big');
+  return { full: scaled(img, 1280, 0.82), thumb: squared(img, 420, 0.8) };
+}
+function setImportStatus(msg){ const el = $('#import-status'); if (el){ el.textContent = msg; el.hidden = !msg; } }
+function setImportBusy(on){
+  document.querySelectorAll('#sheet [data-act="add-go"],#sheet [data-act="add-manual"],#sheet [data-act="paste-clip"],#sheet [data-act="add-img-del"],#sheet label[for="add-file"],#add-text').forEach(el => { if ('disabled' in el) el.disabled = on; el.classList.toggle('is-busy', on); });
+  const c = $('#import-cancel'); if (c) c.hidden = !on;
+}
+function setPrepState(){
+  const b = $('#sheet [data-act="add-go"]'); if (!b || S.importing) return;
+  b.disabled = S.preparing > 0;
+  b.textContent = S.preparing > 0 ? '画像を準備しています…' : (relayReady() ? '取り込んで登録' : '次へ');
+}
+let importOp = null;
+function cancelImport(){ if (importOp){ importOp.cancelled = true; importOp.ctrl.abort(); } }
+function maybeAutoFromPaste(){
+  const ta = $('#add-text');
+  if (!ta || !relayReady() || S.importing || S.preparing || S.addImgs.length) return;
+  const v = ta.value.trim();
+  if (!/^https?:\/\/[^\s　<>"'「」]+$/.test(v)) return;
+  let host = ''; try { host = new URL(v).hostname; } catch (e) { return; }
+  if (LOGIN_WALL_RE.test(host)){ toast('インスタなどの投稿は、スクショを選んでから「取り込んで登録」を押してください'); return; }
+  autoImport();
+}
+async function autoImport(){
+  if (S.importing) return;
+  if (S.preparing){ toast('画像を準備しています。少し待ってから押してください'); return; }
+  const text = $('#add-text').value, imgs = S.addImgs.slice();
+  const p0 = parseRecipeText(text), url = p0.url;
+  let host = ''; try { host = url ? new URL(url).hostname : ''; } catch (e) {}
+  const wall = !!host && LOGIN_WALL_RE.test(host);
+  if (!url && !imgs.length && !text.trim()){ toast('URLか文章を貼り付けるか、スクショを選んでください'); return; }
+  if (wall && !imgs.length && !p0.ingredients.length && !p0.steps.length){ toast('インスタなどの投稿は、スクショを選んでください'); return; }
+  const op = importOp = { ctrl: new AbortController(), cancelled: false };
+  S.importing = true; setImportBusy(true);
+  try { await runImport(op, text, imgs, url, wall); }
+  catch (e) { console.error(e); if (!op.cancelled) toast('うまく取り込めませんでした。もう一度試してください'); }
+  finally {
+    if (importOp === op) importOp = null;
+    S.importing = false; setImportBusy(false); setImportStatus('');
+  }
+}
+async function runImport(op, text, imgs, url, wall){
+  const stopped = () => { if (op.cancelled){ toast('取り込みをやめました'); return true; } return false; };
+  const problems = [], failedShots = [];
+  let site = null, ocrText = '';
+  if (url && !wall){
+    setImportStatus('レシピのページを読み込んでいます…');
+    const r = await callRelay({ action: 'fetch', url }, { ctrl: op.ctrl });
+    if (stopped()) return;
+    if (r.ok) site = checkSite(r); else problems.push(relayErrText(r.error));
+  }
+  // サイトにレシピがあればそれだけを使う(スクショの文字と混ぜない)
+  const siteBody = !!(site && site.found && (site.ingredients.length || site.steps.length));
+  if (!siteBody){
+    for (let i = 0; i < imgs.length; i++){
+      setImportStatus('スクショの文字を読み取っています(' + (i + 1) + '/' + imgs.length + ')…');
+      const r = await callRelay({ action: 'ocr', image: imgs[i].ocr || imgs[i].full }, { ctrl: op.ctrl });
+      if (stopped()) return;
+      if (r.ok && typeof r.text === 'string') ocrText += '\n' + r.text.slice(0, 50000);
+      else { failedShots.push(i + 1); problems.push(relayErrText(r.error)); }
+    }
+  }
+  const pasted = text.replace(URL_IN_TEXT_RE, ' ').trim();
+  const combined = siteBody ? '' : [pasted, cleanOcrText(ocrText).trim()].filter(Boolean).join('\n');
+  const p = siteBody ? null : parseRecipeText(combined);
+  const ingredients = siteBody ? site.ingredients : p.ingredients;
+  const steps = siteBody ? site.steps : p.steps;
+  const servings = String((siteBody ? site.servings : p.servings) || '').slice(0, 40);
+  let title = String((site && site.title) || (p && p.title) || '').slice(0, 200);
+  const named = !!title;
+  if (!title){
+    const label = url ? (sourceInfo(url) || {}).label : '';
+    title = (wall || imgs.length) ? 'インスタのレシピ ' + fmtShort(todayStr()) : (label ? label + 'のレシピ' : 'レシピ ' + fmtShort(todayStr()));
+  }
+  let image = imgs[0] ? { full: imgs[0].full, thumb: imgs[0].thumb } : null;
+  if (!image && site && site.image){
+    setImportStatus('写真を準備しています…');
+    try { image = await dataUrlToImages(site.image); } catch (e) {}
+    if (stopped()) return;
+  }
+  const hasBody = ingredients.length > 0 || steps.length > 0;
+  const toEdit = notice => {
+    closeSheet();
+    showEdit({ title: named ? title : '', sourceUrl: url, servings, ingredientsText: ingredients.join('\n'), stepsText: steps.join('\n'),
+      img: image, imgDirty: !!image, rawText: combined, notice });
+  };
+  if (failedShots.length) return toEdit(failedShots.join('・') + '枚目のスクショを読み取れませんでした(' + problems[problems.length - 1] + ')。読み取れた分を入れたので、確かめて保存してください。');
+  if (!hasBody){
+    if (site && site.title) return toEdit('料理名と写真は読み込めましたが、材料と作り方は読み取れませんでした。確かめて保存してください。');
+    return toEdit((problems[0] ? problems[0] + '。' : '') + '自動では読み取れなかったので、入れられるところを入れて保存してください。');
+  }
+  const r = { id: uid(), sample: false, title, sourceUrl: cleanUrl(url) || '', servings, ingredients, steps, rating: 0, memo: '', cooked: [], shopChecked: [],
+    thumb: image ? image.thumb : '', rawText: combined, createdAt: new Date().toISOString() };
+  const notes = { main: '自動で登録しました', missing: !ingredients.length ? '材料は読み取れませんでした' : (!steps.length ? '作り方は読み取れませんでした' : ''), unnamed: !named };
+  const dupOf = r.sourceUrl && S.recipes.find(o => o.sourceUrl === r.sourceUrl);
+  if (dupOf){
+    openConfirm('このリンクのレシピはもう入っています', '「' + dupOf.title + '」として登録済みです。もう1つ登録しますか?', 'もう1つ登録する',
+      () => registerImported(r, image, notes), false, { label: '入っている方を開く', run: () => { clearDraft(); showDetail(dupOf.id); } });
+    return;
+  }
+  await registerImported(r, image, notes);
+}
+async function registerImported(r, image, notes){
+  if (!(await saveR(r))) return;
+  let imgOk = true;
+  if (image){ try { await DB.put('images', { id: r.id, data: image.full }); } catch (e) { imgOk = false; } }
+  clearDraft(); closeSheet(); S.addImgs = [];
+  showDetail(r.id);
+  const parts = [notes.main];
+  if (notes.missing) parts.push(notes.missing);
+  if (notes.unnamed) parts.push('料理名を確かめてください');
+  if (!imgOk) parts.push('写真は保存できませんでした');
+  toast(parts.join('。'), { label: '取り消す', run: async () => {
+    try { await DB.del('recipes', r.id); await DB.del('images', r.id); }
+    catch (e) { toast('取り消せませんでした。「編集」から削除してください'); return; }
+    S.recipes = S.recipes.filter(x => x.id !== r.id); showList(); toast('取り消しました');
+  } });
+}
+let relayCheck = null;
+async function checkRelay(cfg){
+  if (relayCheck) return null;
+  relayCheck = new AbortController();
+  try { return await callRelay({ action: 'ping' }, { cfg, ctrl: relayCheck, timeout: 30000 }); }
+  finally { relayCheck = null; }
+}
+const setRelayState = t => { const el = $('#relay-state'); if (el) el.textContent = t; };
+function relaySectionHTML(){
+  if (IN_FRAME) return '<section class="set-sec"><h3>自動取り込み</h3><p class="hint">URLやスクショから自動で登録する機能は、本番のアプリで設定して使います。</p></section>';
+  const on = relayReady();
+  return '<section class="set-sec"><h3>自動取り込み</h3>' +
+    '<p class="hint">URLを貼るとページを読み込み、スクショは文字を読み取って、自動で登録します。読み込みと文字の読み取りは、自分のGoogleアカウントに置いた「取り込み係」(Google Apps Script)が行います。スクショは読み取りに使ったあと削除します(消し損ねても、次に読み取るときに片付けます)。</p>' +
+    '<p class="kv"><span>状態</span><b id="relay-state">' + (on ? '設定済み' : 'まだ設定していません') + '</b></p>' +
+    (on ? '<div class="note-row"><button class="btn sm" data-act="relay-test">つながるか確かめる</button><button class="btn sm" data-act="relay-clear">設定を消す</button></div>'
+        : '<input id="relay-code" class="code-input" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="設定コードを貼り付け" aria-label="設定コード"><button class="btn btn-primary btn-block" data-act="relay-save">保存して、つながるか確かめる</button>') +
+    '</section>';
 }
 
 /* ---------- 買い物モード ---------- */
@@ -1100,9 +1368,10 @@ function openSettings(){
       '<div id="backup-slot" class="sheet-stack"><button class="btn btn-primary btn-block" data-act="backup-prepare">' + ic('down') + 'バックアップのファイルを作る</button></div>' +
       '<label class="btn btn-block" for="import-file">' + ic('up') + 'バックアップから戻す</label><input id="import-file" class="vh" type="file" accept="application/json,.json">' +
     '</section>' +
+    relaySectionHTML() +
     (samples ? '<section class="set-sec"><h3>見本のレシピ</h3><p class="hint">見本が' + samples + '品入っています。自分のレシピを入れたら消してください。</p><button class="btn btn-block" data-act="del-samples">見本を消す</button></section>' : '') +
     (DB.mode === 'mem' ? '<p class="hint">この画面ではレシピを保存できません。</p>' : '') +
-    '<p class="ver">ぽじおレシピブック 試作版 v0.3.1</p>');
+    '<p class="ver">ぽじおレシピブック 試作版 v0.4.1</p>');
   const u = $('#usage');
   try {
     if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(e => { if (u) u.textContent = '約' + ((e.usage || 0) / 1048576).toFixed(1) + 'MB'; }).catch(() => { if (u) u.textContent = '不明'; });
@@ -1168,19 +1437,49 @@ const ACT = {
     else toast('今日作ったことを記録しました', { label: '取り消す', run: async () => { await setCooked(r, t, false); if (S.view === 'detail') renderDetail(); } });
   },
   'wake-retry': () => acquireWake(),
-  'sheet-close': () => { if ($('#add-text')) clearDraft(); closeSheet(); },
-  'confirm-ok': async () => { const run = confirmRun; confirmRun = null; closeSheet(); if (run) await run(); },
+  'sheet-close': () => dismissSheet(),
+  'confirm-ok': async () => { const run = confirmRun; confirmRun = null; confirmCancel = null; closeSheet(); if (run) await run(); },
+  'confirm-cancel': async () => { const run = confirmCancel; confirmRun = null; confirmCancel = null; closeSheet(); if (run) await run(); },
   'toast-action': async () => { const run = S.toastRun; S.toastRun = null; $('#toast').hidden = true; if (run) await run(); },
   'add-manual': () => { clearDraft(); closeSheet(); showEdit({}); },
   'add-go': () => {
+    if (S.preparing){ toast('画像を準備しています。少し待ってから押してください'); return; }
+    if (relayReady()) return autoImport();
     const t = $('#add-text').value;
-    if (!t.trim() && !S.addImg){ toast('URLか文章を貼り付けるか、画像を選んでください'); return; }
-    goParse(t, S.addImg);
+    if (!t.trim() && !S.addImgs.length){ toast('URLか文章を貼り付けるか、画像を選んでください'); return; }
+    goParse(t, S.addImgs[0] || null);
   },
+  'add-img-del': el => { S.addImgs.splice(Number(el.dataset.i), 1); $('#add-imgs').innerHTML = addImgsHTML(); queueDraft(); },
+  'import-cancel': () => cancelImport(),
   'paste-clip': async el => {
     const ta = $('#' + el.dataset.t);
-    try { const t = await navigator.clipboard.readText(); if (t){ ta.value = ta.value ? ta.value.replace(/\s+$/, '') + '\n' + t : t; queueDraft(); } }
+    try { const t = await navigator.clipboard.readText(); if (t){ ta.value = ta.value ? ta.value.replace(/\s+$/, '') + '\n' + t : t; queueDraft(); if (ta.id === 'add-text') maybeAutoFromPaste(); } }
     catch (e) { toast('欄を長押しして「ペースト」を選んでください'); }
+  },
+  'relay-save': async () => {
+    const input = $('#relay-code'), cfg = parseRelayCode(input && input.value);
+    if (!cfg){ toast('設定コードの形が違います。届いたコードをそのまま貼り付けてください'); return; }
+    setRelayState('確かめています…');
+    const r = await checkRelay(cfg);
+    if (!r) return;
+    if (!r.ok){ setRelayState('つながりませんでした'); if (r.error !== 'aborted') toast(relayErrText(r.error)); return; }
+    try { await DB.put('meta', { key: 'relay', value: cfg }); } catch (e) { setRelayState('保存できませんでした'); toast('設定を保存できませんでした'); return; }
+    S.relay = cfg;
+    if ($('#relay-state')) openSettings();
+    toast('自動取り込みの設定ができました');
+  },
+  'relay-test': async () => {
+    if (!S.relay) return;
+    setRelayState('確かめています…');
+    const r = await checkRelay(S.relay);
+    if (!r) return;
+    setRelayState(r.ok ? 'つながりました' : 'つながりませんでした');
+    if (!r.ok && r.error !== 'aborted') toast(relayErrText(r.error));
+  },
+  'relay-clear': async () => {
+    if (relayCheck) relayCheck.abort();
+    try { await DB.del('meta', 'relay'); } catch (e) { toast('設定を消せませんでした'); return; }
+    S.relay = null; if ($('#relay-state')) openSettings(); toast('自動取り込みの設定を消しました');
   },
   'edit-cancel': () => { const id = S.draft && S.draft.id; S.draft = null; clearDraft(); id ? showDetail(id) : showList(); },
   'edit-save': () => saveDraft(),
@@ -1211,7 +1510,7 @@ const ACT = {
   },
 };
 document.addEventListener('click', e => {
-  if (e.target.id === 'sheet'){ if ($('#add-text')) clearDraft(); closeSheet(); return; }
+  if (e.target.id === 'sheet'){ dismissSheet(); return; }
   const el = e.target.closest('[data-act]');
   if (!el || el.disabled) return;
   const fn = ACT[el.dataset.act];
@@ -1246,16 +1545,35 @@ document.addEventListener('change', async e => {
       $('#img-prev').innerHTML = imgTag(im.thumb); $('#img-remove').hidden = false; queueDraft();
     } catch (err) { toast('この画像は読み込めませんでした'); }
   } else if (t.id === 'add-file'){
-    try { S.addImg = await fileToImages(file); $('#add-prev').innerHTML = imgTag(S.addImg.thumb); queueDraft(); }
-    catch (err) { toast('この画像は読み込めませんでした'); }
+    const gen = S.addGen, auto = relayReady();
+    const room = auto ? MAX_SHOTS - S.addImgs.length : 1;
+    const all = Array.from(t.files), files = all.slice(0, Math.max(0, room));
+    t.value = '';
+    if (!files.length){ toast('スクショは' + MAX_SHOTS + '枚までです'); return; }
+    if (auto && all.length > files.length) toast('スクショは' + MAX_SHOTS + '枚までなので、' + files.length + '枚だけ入れます');
+    S.preparing = (S.preparing || 0) + 1; setPrepState();
+    try {
+      for (const f of files){
+        let im = null;
+        try { im = await fileToImages(f, auto); } catch (err) { toast('読み込めない画像がありました'); }
+        if (gen !== S.addGen) return;
+        if (im){ if (auto) S.addImgs.push(im); else S.addImgs = [im]; }
+      }
+    } finally {
+      if (gen === S.addGen){ S.preparing = Math.max(0, S.preparing - 1); setPrepState(); }
+    }
+    const box = $('#add-imgs'); if (box) box.innerHTML = addImgsHTML();
+    queueDraft();
+    return;
   } else if (t.id === 'import-file'){
     await readBackup(file);
   }
   t.value = '';
 });
+document.addEventListener('paste', e => { if (e.target && e.target.id === 'add-text') setTimeout(maybeAutoFromPaste, 60); });
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  if (!$('#sheet').hidden) closeSheet();
+  if (!$('#sheet').hidden) dismissSheet();
   else if (!$('#cook').hidden) closeMode('cook');
   else if (!$('#shop').hidden) closeMode('shop');
 });
@@ -1273,6 +1591,7 @@ async function init(){
     try { await DB.put('meta', { key: 'seeded', value: true }); } catch (e) {}
   }
   try { const b = await DB.get('meta', 'lastBackup'); S.lastBackup = b ? b.value : null; } catch (e) {}
+  try { const rl = await DB.get('meta', 'relay'); S.relay = rl && rl.value && typeof rl.value.url === 'string' && typeof rl.value.token === 'string' ? rl.value : null; } catch (e) {}
   try { const d = await DB.get('meta', 'draft'); if (d && d.value && Date.now() - (d.value.at || 0) < 7 * 864e5) S.pendingDraft = d.value; } catch (e) {}
   S.recipes = recipes;
   $('#mem-banner').hidden = DB.mode !== 'mem';
