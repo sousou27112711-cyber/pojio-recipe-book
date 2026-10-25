@@ -93,10 +93,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await sleep(300);
   log.push('5) インスタURLだけ: ' + await toastText());
   await pickShots(1);
+  log.push('5) 追加画面の印: ' + await ev(`document.querySelector('#add-imgs .thumb-tag')?.textContent`));
   await shot('21_add_shot.png');
   await click('[data-act="add-go"]');
   await waitFor(inDetail);
   log.push('5) スクショから登録: ' + await detailSummary() + ' / 元リンク ' + await ev(`document.querySelector('.src-link')?.textContent`) + ' / ' + await toastText());
+  await sleep(500);
+  log.push('5) トップ画像: ' + await ev(`(()=>{const i=document.querySelector('#hero-img'); const c=document.createElement('canvas'); c.width=i.naturalWidth; c.height=i.naturalHeight; const g=c.getContext('2d'); g.drawImage(i,0,0); const p=g.getImageData(Math.round(c.width*0.05), Math.round(c.height*0.05), 1, 1).data; return i.naturalWidth+'x'+i.naturalHeight+' 左上の色 rgb('+p[0]+','+p[1]+','+p[2]+')';})()`));
   await shot('22_imported_shot.png');
   await click('[data-act="back"]');
 

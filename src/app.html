@@ -429,6 +429,61 @@ function parseRecipeText(input){
   out.steps = out.steps.filter(Boolean);
   return out;
 }
+// スクショの中から料理写真の部分を探す。インスタなどの画面は背景が白か黒の一色で、
+// 投稿の写真だけが左端から右端まで色で埋まっている。その行が続く一番長い帯を写真とみなす。
+// rgba は縮小した画像の画素(幅w・高さh)。見つかれば画像に対する割合 {x,y,w,h}、なければ null。
+function findPhotoBand(rgba, w, h){
+  const at = (x, y) => (y * w + x) * 4;
+  const counts = new Map();
+  for (let y = 0; y < h; y++){
+    for (const x of [1, 2, w - 3, w - 2]){
+      const i = at(x, y), k = (rgba[i] << 16) | (rgba[i + 1] << 8) | rgba[i + 2];
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+  }
+  let bgKey = 0, best = -1;
+  counts.forEach((n, k) => { if (n > best){ best = n; bgKey = k; } });
+  if (best < h * 4 * 0.3) return null;   // 端に一色の背景が見つからない(写真そのものなど)
+  const br = (bgKey >> 16) & 255, bgc = (bgKey >> 8) & 255, bb = bgKey & 255;
+  const isBg = (x, y) => { const i = at(x, y); return Math.abs(rgba[i] - br) <= 8 && Math.abs(rgba[i + 1] - bgc) <= 8 && Math.abs(rgba[i + 2] - bb) <= 8; };
+  const edge = Math.max(2, Math.round(w * 0.04));
+  const photoRow = new Array(h), rowFill = new Array(h);
+  for (let y = 0; y < h; y++){
+    let fill = 0, left = 0, right = 0;
+    for (let x = 0; x < w; x++){
+      if (!isBg(x, y)){ fill++; if (x < edge) left++; else if (x >= w - edge) right++; }
+    }
+    rowFill[y] = fill / w;
+    photoRow[y] = rowFill[y] > 0.6 && left / edge > 0.5 && right / edge > 0.5;
+  }
+  const segs = [];
+  let s0 = -1;
+  for (let y = 0; y <= h; y++){
+    const on = y < h && photoRow[y];
+    if (on && s0 < 0) s0 = y;
+    if (!on && s0 >= 0){ segs.push([s0, y]); s0 = -1; }
+  }
+  // 写真の中の白っぽい部分(行のどこかに色がある)をはさむならつなぐ。背景だけの行をはさむならつながない
+  const gapMax = Math.max(2, Math.round(h * 0.03));
+  const photoish = (a, b) => { for (let y = a; y < b; y++) if (rowFill[y] < 0.15) return false; return true; };
+  const runs = [];
+  for (const sg of segs){
+    const prev = runs[runs.length - 1];
+    if (prev && sg[0] - prev[1] <= gapMax && photoish(prev[1], sg[0])) prev[1] = sg[1];
+    else runs.push(sg.slice());
+  }
+  let run = null;
+  for (const r of runs) if (!run || r[1] - r[0] > run[1] - run[0]) run = r;
+  if (!run) return null;
+  const y0 = run[0] + 1, y1 = run[1] - 1, bh = y1 - y0;
+  if (bh < w * 0.3 || bh < h * 0.1) return null;   // 小さすぎる(ボタンや帯状の飾り)
+  if (bh > h * 0.9) return null;                     // ほぼ全面(リール動画など)は切り抜かない
+  const colFill = x => { let n = 0; for (let y = y0; y < y1; y++) if (!isBg(x, y)) n++; return n / bh; };
+  let x0 = 0, x1 = w;
+  while (x0 < w / 3 && colFill(x0) < 0.5) x0++;
+  while (x1 > w * 2 / 3 && colFill(x1 - 1) < 0.5) x1--;
+  return { x: x0 / w, y: y0 / h, w: (x1 - x0) / w, h: bh / h };
+}
 /* PARSER-END */
 
 (() => {
@@ -572,11 +627,39 @@ function squared(src, size, q){
 }
 async function fileToImages(file, withOcr){
   const bmp = await loadBitmap(file);
-  const out = { full: scaled(bmp, 1280, 0.82), thumb: squared(bmp, 420, 0.8) };
+  let photo = bmp, photoFound = false;
+  if (looksLikeScreenshot(file, bmp)){
+    const rect = detectPhoto(bmp);
+    if (rect){ photo = cropTo(bmp, rect); photoFound = true; }
+  }
+  const out = { full: scaled(photo, 1280, 0.82), thumb: squared(photo, 420, 0.8), photoFound };
   if (withOcr) out.ocr = forOcr(bmp);
   if (bmp.close) bmp.close();
   return out;
 }
+// iPhoneの画面の縦長の形(またはPNGの縦長)ならスクショとみなす。カメラの写真には手を加えない
+function looksLikeScreenshot(file, src){
+  const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+  return h / w >= 1.9 || (file && file.type === 'image/png' && h / w >= 1.4);
+}
+function detectPhoto(src){
+  try {
+    const w0 = src.width || src.naturalWidth, h0 = src.height || src.naturalHeight;
+    const w = 180, h = Math.max(1, Math.round(h0 * w / w0));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(src, 0, 0, w, h);
+    return findPhotoBand(g.getImageData(0, 0, w, h).data, w, h);
+  } catch (e) { return null; }
+}
+function cropTo(src, r){
+  const w0 = src.width || src.naturalWidth, h0 = src.height || src.naturalHeight;
+  const sx = Math.round(r.x * w0), sy = Math.round(r.y * h0), sw = Math.round(r.w * w0), sh = Math.round(r.h * h0);
+  const c = document.createElement('canvas'); c.width = sw; c.height = sh;
+  c.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
+  return c;
+}
+const photoIndex = imgs => Math.max(0, imgs.findIndex(im => im && im.photoFound));
 // 文字読み取り用。小さい字がつぶれないよう、幅1400・高さ3600までに収める
 function forOcr(src){
   const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
@@ -926,7 +1009,7 @@ function toast(msg, action){
 const pasteBtn = target => IN_FRAME ? '' : '<button class="btn" data-act="paste-clip" data-t="' + target + '">' + ic('clip') + 'コピーした内容を貼り付け</button>';
 function addImgsHTML(){
   if (!S.addImgs.length) return '<div class="img-prev sm">画像なし</div>';
-  return '<div class="thumbs">' + S.addImgs.map((im, i) => '<div class="thumb">' + imgTag(im.thumb) + (i === 0 ? '<span class="thumb-tag">写真</span>' : '') +
+  return '<div class="thumbs">' + S.addImgs.map((im, i) => '<div class="thumb">' + imgTag(im.thumb) + (i === photoIndex(S.addImgs) ? '<span class="thumb-tag">' + (im.photoFound ? '写真を切り抜き' : '写真') + '</span>' : '') +
     '<button class="thumb-del" data-act="add-img-del" data-i="' + i + '" aria-label="' + (i + 1) + '枚目を外す">' + ic('x') + '</button></div>').join('') + '</div>';
 }
 function openAdd(pre){
@@ -940,7 +1023,7 @@ function openAdd(pre){
     pasteBtn('add-text') +
     '<div id="add-imgs">' + addImgsHTML() + '</div>' +
     '<label class="btn" for="add-file">' + ic('image') + 'スクショ・写真を選ぶ</label><input id="add-file" class="vh" type="file" accept="image/*"' + (auto ? ' multiple' : '') + '>' +
-    '<p class="hint">' + (auto ? '1枚目が料理の写真になります。全部の文字を読み取って、材料と作り方に分けます。' : '選んだ画像が料理の写真になります。') + '</p>' +
+    '<p class="hint">' + (auto ? '料理の写真は、スクショの中から自動で切り抜きます。全部の文字を読み取って、材料と作り方に分けます。' : '選んだ画像が料理の写真になります。') + '</p>' +
     (auto ? '' : '<details class="howto"><summary>スクショの文字を写すには</summary><ol class="steps-guide"><li>写真アプリでスクショを開く</li><li>文字を長押しして選び、「コピー」</li><li>上の欄を長押しして「ペースト」</li></ol></details>') +
     '<p class="import-status" id="import-status" role="status" aria-live="polite" hidden></p>' +
     '<button class="btn btn-primary btn-block" data-act="add-go">' + (auto ? '取り込んで登録' : '次へ') + '</button>' +
@@ -1098,12 +1181,13 @@ async function runImport(op, text, imgs, url, wall){
     const label = url ? (sourceInfo(url) || {}).label : '';
     title = (wall || imgs.length) ? 'インスタのレシピ ' + fmtShort(todayStr()) : (label ? label + 'のレシピ' : 'レシピ ' + fmtShort(todayStr()));
   }
-  let image = imgs[0] ? { full: imgs[0].full, thumb: imgs[0].thumb } : null;
-  if (!image && site && site.image){
+  let image = null;
+  if (site && site.image){
     setImportStatus('写真を準備しています…');
     try { image = await dataUrlToImages(site.image); } catch (e) {}
     if (stopped()) return;
   }
+  if (!image && imgs.length){ const shot = imgs[photoIndex(imgs)]; image = { full: shot.full, thumb: shot.thumb }; }
   const hasBody = ingredients.length > 0 || steps.length > 0;
   const toEdit = notice => {
     closeSheet();
@@ -1354,7 +1438,7 @@ function openSettings(){
     relaySectionHTML() +
     (samples ? '<section class="set-sec"><h3>見本のレシピ</h3><p class="hint">見本が' + samples + '品入っています。自分のレシピを入れたら消してください。</p><button class="btn btn-block" data-act="del-samples">見本を消す</button></section>' : '') +
     (DB.mode === 'mem' ? '<p class="hint">この画面ではレシピを保存できません。</p>' : '') +
-    '<p class="ver">ぽじおレシピブック 試作版 v0.4.1</p>');
+    '<p class="ver">ぽじおレシピブック 試作版 v0.5</p>');
   const u = $('#usage');
   try {
     if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(e => { if (u) u.textContent = '約' + ((e.usage || 0) / 1048576).toFixed(1) + 'MB'; }).catch(() => { if (u) u.textContent = '不明'; });
