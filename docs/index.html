@@ -296,6 +296,7 @@ const CIRCLED = '①-⑳❶-❿➀-➉⓵-⓾';
 const STEP_NUM_RE = new RegExp('^(?:(?:step|ステップ)\\s*[0-9０-９]{1,2}\\s*[.．。、,，:：)）]?\\s*|[' + CIRCLED + '](?![のをにとがはへで])\\s*|[(（]\\s*[0-9０-９]{1,2}\\s*[)）]\\s*|[0-9０-９]{1,2}\\s*(?:[.．](?![0-9０-９])|[。、,，:：)）]|\\s)\\s*)', 'i');
 const MULTI_STEP_RE = new RegExp('(?<!^)(?=[' + CIRCLED + '](?![のをにとがはへで]))', 'g');
 const STEPLIKE_END_RE = /(る|す|た|て|ます|ください|しょう)[。．!！]?$/;
+const BARE_NUM_RE = /^([0-9０-９]{1,2})(?=[^\s0-9０-９.．、,:：)）分秒時日晩度個枚本粒合杯回割人口切袋缶丁束株房片尾匹gGmMlLcCkK%％倍〜~\-\/／])/;
 const AMOUNT_ONLY_RE = new RegExp('^(?:(?:大さじ|小さじ|大匙|小匙|カップ|大|小)\\s*[0-9０-９½¼¾⅓⅔][0-9０-９½¼¾⅓⅔/／.と〜~]*|[0-9０-９½¼¾⅓⅔][0-9０-９½¼¾⅓⅔/／.〜~]*\\s*(?:' + UNITS + ')|' + QTY_WORDS + ')(?:\\s*[（(][^）)]*[）)])?$');
 const CTA_RE = /(保存して(?:ね|あとで|後で|見返)|あとで見返|後で見返|保存必須|保存版|必見|ブックマーク|フォロー|いいね|コメント(?:で|して|ください|欄)|プロフ|ハイライト|リンクから|DMで|作ったら教えて|参考になったら)/;
 
@@ -352,8 +353,8 @@ function pickTitle(lines){
   for (const raw of lines){
     let s = String(raw).trim();
     if (!s || CTA_RE.test(s)) continue;
-    const deco = /^[＼\\].*[／\/]$/.test(s);
-    s = s.replace(/^[＼\\]+|[／\/]+$/g, '').replace(/\p{Extended_Pictographic}/gu, '').replace(/[️‍]/g, '');
+    const deco = /^[＼\\].*[／\/]\s*$/.test(s);
+    s = s.replace(/^[＼\\]+\s*|\s*[／\/]+\s*$/g, '').replace(/\p{Extended_Pictographic}/gu, '').replace(/[️‍]/g, '');
     s = s.replace(/^[【「『\[［〈《<＜]+|[】」』\]］〉》>＞]+$/g, '').replace(/[\s　]+/g, ' ').trim();
     if (!s || s.length > 40 || /^[^\p{L}\p{N}]+$/u.test(s)) continue;
     cands.push({ s, deco });
@@ -389,8 +390,10 @@ function cleanOcrText(text){
     if (/^[0-9０-９]+\s*(秒|分|時間|日|週間|か月|ヶ月|年)前$/.test(l)) return false;
     if (/^[0-9０-９]{1,2}月[0-9０-９]{1,2}日$/.test(l)) return false;
     if (UI_LINE_RE.test(l) || USER_RE.test(l)) return false;
+    if (/^(?:(?:[0-9]G|LTE)\+?\s*)?[0-9]{1,3}\s*[%％]$/.test(l)) return false;   // 電波と電池の表示
+    if (/^[_＿\-ー─━=＝・.。、,\s○◯●]+$/.test(l)) return false;                // 記号やアイコンだけの行
     return true;
-  }).map(l => l.replace(/^(?=[A-Za-z0-9._]*[A-Za-z]{2})(?=[A-Za-z0-9._]*[._])[A-Za-z0-9._]{3,30}\s+(?=[^\x00-\x7F])/, '')).join('\n');
+  }).map(l => l.replace(/^(?=[A-Za-z0-9._]*[A-Za-z]{2})(?=[A-Za-z0-9._]*[._])[A-Za-z0-9._]{3,30}\s+/, '')).join('\n');
 }
 function parseRecipeText(input){
   const out = { url: '', title: '', servings: '', ingredients: [], steps: [] };
@@ -407,10 +410,12 @@ function parseRecipeText(input){
     if (cs && cs.length > 1) lines.push(...l.split(MULTI_STEP_RE).map(x => x.trim()).filter(Boolean));
     else lines.push(l);
   }
-  let mode = 'intro', numbered = false, gap = false;
+  let mode = 'intro', numbered = false, gap = false, stepNo = 0;
   let intro = [];
   const addStep = clean => {
-    if (isNumbered(clean)){ out.steps.push(stripStepNum(clean)); numbered = true; }
+    const bare = isNumbered(clean) ? null : clean.match(BARE_NUM_RE);
+    if (isNumbered(clean)){ out.steps.push(stripStepNum(clean)); numbered = true; stepNo++; }
+    else if (bare && Number(toHalf(bare[1])) === stepNo + 1){ out.steps.push(clean.slice(bare[1].length).trim()); numbered = true; stepNo++; }
     else if (numbered && out.steps.length && !gap){ const i = out.steps.length - 1; out.steps[i] = joinJa(out.steps[i], clean); }
     else out.steps.push(clean);
   };
@@ -420,7 +425,7 @@ function parseRecipeText(input){
     if (h){
       mode = h; gap = false;
       if (h === 'ing' && !out.servings) out.servings = servingsOf(raw);
-      if (h === 'step') numbered = false;
+      if (h === 'step'){ numbered = false; stepNo = 0; }
       continue;
     }
     const clean = stripDecor(raw);
@@ -1498,7 +1503,7 @@ function openSettings(){
     relaySectionHTML() +
     (samples ? '<section class="set-sec"><h3>見本のレシピ</h3><p class="hint">見本が' + samples + '品入っています。自分のレシピを入れたら消してください。</p><button class="btn btn-block" data-act="del-samples">見本を消す</button></section>' : '') +
     (DB.mode === 'mem' ? '<p class="hint">この画面ではレシピを保存できません。</p>' : '') +
-    '<p class="ver">ぽじおレシピブック 試作版 v0.7</p>');
+    '<p class="ver">ぽじおレシピブック 試作版 v0.7.1</p>');
   const u = $('#usage');
   try {
     if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(e => { if (u) u.textContent = '約' + ((e.usage || 0) / 1048576).toFixed(1) + 'MB'; }).catch(() => { if (u) u.textContent = '不明'; });
