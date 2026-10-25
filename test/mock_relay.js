@@ -17,8 +17,9 @@ http.createServer((req, res) => {
     if (q.action === 'ocr'){
       ocrCalls++;
       if (!/^data:image\/(jpeg|png);base64,/.test(q.image || '')) return send(res, { ok: false, error: 'bad_image' });
-      if (ocrCalls % 3 === 0) return send(res, { ok: false, error: 'server_error' });   // 3回に1回は失敗させる
-      return setTimeout(() => send(res, { ok: true, text: OCR_TEXT }), 300);
+      const n = (q.image || '').length;
+      if (n < 20000) return send(res, { ok: false, error: 'server_error' });                       // 小さすぎる画像は失敗させる
+      return setTimeout(() => send(res, { ok: true, text: n > 500000 ? 'やみつき\n#レシピ' : OCR_TEXT }), 300);   // 写真っぽい大きい画像は文字が少ない
     }
     if (q.action === 'fetch'){
       const name = ['kurashiru', 'delish', 'nadia', 'rakuten', 'sirogohan'].find(n => fs.existsSync(path.join(dir, n + '.url')) && fs.readFileSync(path.join(dir, n + '.url'), 'utf8').trim() === q.url);

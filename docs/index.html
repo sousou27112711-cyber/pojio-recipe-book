@@ -362,6 +362,21 @@ function pickTitle(lines){
   const pick = cands.find(c => !c.deco && ja(c)) || cands.find(c => ja(c)) || cands.find(c => !c.deco) || cands[0];
   return pick ? pick.s : '';
 }
+// 何枚かのスクショの文字をつなぐ。スクロールして撮ったときに前の終わりと重なった行は外す
+function mergeOcrTexts(texts){
+  const out = [], key = l => l.replace(/\s/g, '');
+  for (const t of texts){
+    const lines = cleanOcrText(t).split('\n').map(x => x.trim()).filter(Boolean);
+    let k = Math.min(out.length, lines.length);
+    for (; k > 0; k--){
+      let same = true;
+      for (let j = 0; j < k; j++) if (key(out[out.length - k + j]) !== key(lines[j])){ same = false; break; }
+      if (same) break;
+    }
+    out.push(...lines.slice(k));
+  }
+  return out.join('\n');
+}
 // スクショの文字読み取り結果から、インスタの画面の文字(時刻・いいね数・ユーザー名など)を外す
 const UI_LINE_RE = /^(投稿|リール|フォロー中?|フォローする|メッセージ|いいね！?|返信する?|翻訳を見る|もっと見る|続きを読む|その他|シェア|保存|共有|検索|ホーム|プロフィール|広告|おすすめ|Instagram|オリジナル音源.*|.*さん(など)?が「?いいね.*|.*件のコメントを(すべて)?見る|コメントを追加.*)$/;
 const USER_RE = /^(?=[A-Za-z0-9._]*[A-Za-z]{2})(?=[A-Za-z0-9._]*[._])[A-Za-z0-9._]{3,30}$/;
@@ -450,7 +465,8 @@ function parseRecipeText(input){
 }
 // スクショの中から料理写真の部分を探す。インスタなどの画面は背景が白か黒の一色で、
 // 投稿の写真だけが左端から右端まで色で埋まっている。その行が続く一番長い帯を写真とみなす。
-// rgba は縮小した画像の画素(幅w・高さh)。見つかれば画像に対する割合 {x,y,w,h}、なければ null。
+// rgba は縮小した画像の画素(幅w・高さh)。写真の帯が見つかれば {kind:'band', x,y,w,h}(画像に対する割合)、
+// 画面いっぱいが写真・動画(リールを止めた画面など)なら {kind:'full'}、写真がなければ null。
 function findPhotoBand(rgba, w, h){
   const at = (x, y) => (y * w + x) * 4;
   const counts = new Map();
@@ -462,8 +478,10 @@ function findPhotoBand(rgba, w, h){
   }
   let bgKey = 0, best = -1;
   counts.forEach((n, k) => { if (n > best){ best = n; bgKey = k; } });
-  if (best < h * 4 * 0.3) return null;   // 端に一色の背景が見つからない(写真そのものなど)
   const br = (bgKey >> 16) & 255, bgc = (bgKey >> 8) & 255, bb = bgKey & 255;
+  // 画面の背景は白・黒・灰色の一色。そうでなければ画面いっぱいが写真や動画とみなす
+  const neutral = Math.max(br, bgc, bb) - Math.min(br, bgc, bb) <= 10;
+  if (best < h * 4 * 0.4 || !neutral) return { kind: 'full' };
   const isBg = (x, y) => { const i = at(x, y); return Math.abs(rgba[i] - br) <= 8 && Math.abs(rgba[i + 1] - bgc) <= 8 && Math.abs(rgba[i + 2] - bb) <= 8; };
   const edge = Math.max(2, Math.round(w * 0.04));
   const photoRow = new Array(h), rowFill = new Array(h);
@@ -496,12 +514,12 @@ function findPhotoBand(rgba, w, h){
   if (!run) return null;
   const y0 = run[0] + 1, y1 = run[1] - 1, bh = y1 - y0;
   if (bh < w * 0.3 || bh < h * 0.1) return null;   // 小さすぎる(ボタンや帯状の飾り)
-  if (bh > h * 0.9) return null;                     // ほぼ全面(リール動画など)は切り抜かない
+  if (bh > h * 0.9) return { kind: 'full' };         // ほぼ全面が写真・動画
   const colFill = x => { let n = 0; for (let y = y0; y < y1; y++) if (!isBg(x, y)) n++; return n / bh; };
   let x0 = 0, x1 = w;
   while (x0 < w / 3 && colFill(x0) < 0.5) x0++;
   while (x1 > w * 2 / 3 && colFill(x1 - 1) < 0.5) x1--;
-  return { x: x0 / w, y: y0 / h, w: (x1 - x0) / w, h: bh / h };
+  return { kind: 'band', x: x0 / w, y: y0 / h, w: (x1 - x0) / w, h: bh / h };
 }
 /* PARSER-END */
 
@@ -648,8 +666,9 @@ async function fileToImages(file, withOcr){
   const bmp = await loadBitmap(file);
   let photo = bmp, photoFound = false;
   if (looksLikeScreenshot(file, bmp)){
-    const rect = detectPhoto(bmp);
-    if (rect){ photo = cropTo(bmp, rect); photoFound = true; }
+    const found = detectPhoto(bmp);
+    if (found && found.kind === 'band'){ photo = cropTo(bmp, found); photoFound = true; }
+    else if (found && found.kind === 'full'){ photo = cropTo(bmp, { x: 0, y: 0.12, w: 1, h: 0.6 }); photoFound = true; }
   }
   const out = { full: scaled(photo, 1280, 0.82), thumb: squared(photo, 420, 0.8), photoFound };
   if (withOcr) out.ocr = forOcr(bmp);
@@ -679,6 +698,14 @@ function cropTo(src, r){
   return c;
 }
 const photoIndex = imgs => Math.max(0, imgs.findIndex(im => im && im.photoFound));
+// 料理の写真に使うスクショ: 写真が見つかったものの中で、読み取った文字がいちばん少ないもの
+function pickPhotoShot(imgs, ocrLen){
+  const cand = imgs.map((im, i) => i).filter(i => imgs[i].photoFound);
+  const pool = cand.length ? cand : imgs.map((im, i) => i);
+  let best = pool[0];
+  for (const i of pool) if ((ocrLen[i] ?? Infinity) < (ocrLen[best] ?? Infinity)) best = i;
+  return best;
+}
 // 文字読み取り用。小さい字がつぶれないよう、幅1400・高さ3600までに収める
 function forOcr(src){
   const w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
@@ -1028,7 +1055,7 @@ function toast(msg, action){
 const pasteBtn = target => IN_FRAME ? '' : '<button class="btn" data-act="paste-clip" data-t="' + target + '">' + ic('clip') + 'コピーした内容を貼り付け</button>';
 function addImgsHTML(){
   if (!S.addImgs.length) return '<div class="img-prev sm">画像なし</div>';
-  return '<div class="thumbs">' + S.addImgs.map((im, i) => '<div class="thumb">' + imgTag(im.thumb) + (i === photoIndex(S.addImgs) ? '<span class="thumb-tag">' + (im.photoFound ? '写真を切り抜き' : '写真') + '</span>' : '') +
+  return '<div class="thumbs">' + S.addImgs.map((im, i) => '<div class="thumb">' + imgTag(im.thumb) + (S.addImgs.length === 1 ? '<span class="thumb-tag">' + (im.photoFound ? '写真を切り抜き' : '写真') + '</span>' : '') +
     '<button class="thumb-del" data-act="add-img-del" data-i="' + i + '" aria-label="' + (i + 1) + '枚目を外す">' + ic('x') + '</button></div>').join('') + '</div>';
 }
 function openAdd(pre){
@@ -1040,15 +1067,16 @@ function openAdd(pre){
     '<label class="btn" for="add-file">' + ic('image') + 'スクショ・写真を選ぶ</label><input id="add-file" class="vh" type="file" accept="image/*"' + (auto ? ' multiple' : '') + '>' +
     '<p class="hint">' + (auto ? '料理の写真はスクショの中から自動で切り抜き、文字を読み取って材料と作り方に分けます(10枚まで)。' : '選んだ画像が料理の写真になります。') + '</p>';
   if (auto){
-    const hasShots = S.addImgs.length > 0;
     openSheet(sheetHead('レシピを追加') + '<div class="sheet-stack">' +
-      '<p class="hint">レシピのURLを貼るだけで、自動で読み込んで登録します。</p>' +
+      '<p class="hint">レシピサイトはURLを貼るだけ、インスタはスクショを選ぶだけで、自動で登録します。</p>' +
       (IN_FRAME ? '' : '<button class="btn btn-primary btn-block" data-act="paste-url">' + ic('clip') + 'コピーしたURLで登録</button>') +
-      '<textarea id="add-text" rows="2" placeholder="ここにURLを貼り付け(長押しで「ペースト」)">' + esc(pre && pre.text || '') + '</textarea>' +
+      '<label class="btn btn-primary btn-block" for="add-file">' + ic('image') + 'スクショから登録(インスタ)</label><input id="add-file" class="vh" type="file" accept="image/*" multiple>' +
+      '<div id="add-imgs"' + (S.addImgs.length ? '' : ' hidden') + '>' + addImgsHTML() + '</div>' +
       '<p class="import-status" id="import-status" role="status" aria-live="polite" hidden></p>' +
-      '<button class="btn btn-block" data-act="add-go">取り込んで登録</button>' +
       '<button class="btn btn-block" data-act="import-cancel" id="import-cancel" hidden>やめる</button>' +
-      '<details class="howto" id="shot-box"' + (hasShots ? ' open' : '') + '><summary>インスタなど、URLで読めないとき(スクショから)</summary><div class="sheet-stack">' + shotPart(hasShots) + '</div></details>' +
+      '<details class="howto"><summary>インスタのスクショの撮り方</summary><ol class="steps-guide"><li>料理が映っている場面で動画を止めて、スクショ</li><li>説明文は「続きを読む」で全部開いてから、スクショ(長いときは何枚でも)</li><li>「スクショから登録」で、撮ったスクショをまとめて選ぶ(10枚まで)</li></ol><p class="hint">料理の写真は、文字が少ないスクショから自動で選んで切り抜きます。</p></details>' +
+      '<textarea id="add-text" rows="2" placeholder="URLは、ここに長押しで貼り付けても登録できます">' + esc(pre && pre.text || '') + '</textarea>' +
+      '<button class="btn btn-block" data-act="add-go">取り込んで登録</button>' +
       '<button class="text-btn" data-act="add-manual" style="align-self:center">何も貼らずに自分で入力する</button></div>');
     return;
   }
@@ -1159,10 +1187,9 @@ function maybeAutoFromPaste(){
   const v = ta.value.trim();
   if (!/^https?:\/\/[^\s　<>"'「」]+$/.test(v)) return;
   let host = ''; try { host = new URL(v).hostname; } catch (e) { return; }
-  if (LOGIN_WALL_RE.test(host)){ openShotBox(); toast('インスタの投稿はURLだけでは読めません。スクショを選んでから「取り込んで登録」を押してください'); return; }
+  if (LOGIN_WALL_RE.test(host)){ toast('インスタの投稿はURLだけでは読めません。「スクショから登録」でスクショを選んでください'); return; }
   autoImport();
 }
-function openShotBox(){ const d = $('#shot-box'); if (d) d.open = true; }
 async function autoImport(){
   if (S.importing) return;
   if (S.preparing){ toast('画像を準備しています。少し待ってから押してください'); return; }
@@ -1171,7 +1198,7 @@ async function autoImport(){
   let host = ''; try { host = url ? new URL(url).hostname : ''; } catch (e) {}
   const wall = !!host && LOGIN_WALL_RE.test(host);
   if (!url && !imgs.length && !text.trim()){ toast('URLか文章を貼り付けるか、スクショを選んでください'); return; }
-  if (wall && !imgs.length && !p0.ingredients.length && !p0.steps.length){ openShotBox(); toast('インスタの投稿はURLだけでは読めません。スクショを選んでください'); return; }
+  if (wall && !imgs.length && !p0.ingredients.length && !p0.steps.length){ toast('インスタの投稿はURLだけでは読めません。「スクショから登録」でスクショを選んでください'); return; }
   const op = importOp = { ctrl: new AbortController(), cancelled: false };
   S.importing = true; setImportBusy(true);
   try { await runImport(op, text, imgs, url, wall); }
@@ -1184,7 +1211,8 @@ async function autoImport(){
 async function runImport(op, text, imgs, url, wall){
   const stopped = () => { if (op.cancelled){ toast('取り込みをやめました'); return true; } return false; };
   const problems = [], failedShots = [];
-  let site = null, ocrText = '';
+  let site = null;
+  const ocrTexts = [], ocrLen = imgs.map(() => Infinity);
   if (url && !wall){
     setImportStatus('レシピのページを読み込んでいます…');
     const r = await callRelay({ action: 'fetch', url }, { ctrl: op.ctrl });
@@ -1198,12 +1226,12 @@ async function runImport(op, text, imgs, url, wall){
       setImportStatus('スクショの文字を読み取っています(' + (i + 1) + '/' + imgs.length + ')…');
       const r = await callRelay({ action: 'ocr', image: imgs[i].ocr || imgs[i].full }, { ctrl: op.ctrl });
       if (stopped()) return;
-      if (r.ok && typeof r.text === 'string') ocrText += '\n' + r.text.slice(0, 50000);
+      if (r.ok && typeof r.text === 'string'){ ocrTexts.push(r.text.slice(0, 50000)); ocrLen[i] = cleanOcrText(r.text).replace(/\s/g, '').length; }
       else { failedShots.push(i + 1); problems.push(relayErrText(r.error)); }
     }
   }
   const pasted = text.replace(URL_IN_TEXT_RE, ' ').trim();
-  const combined = siteBody ? '' : [pasted, cleanOcrText(ocrText).trim()].filter(Boolean).join('\n');
+  const combined = siteBody ? '' : [pasted, mergeOcrTexts(ocrTexts)].filter(Boolean).join('\n');
   const p = siteBody ? null : parseRecipeText(combined);
   const ingredients = siteBody ? site.ingredients : p.ingredients;
   const steps = siteBody ? site.steps : p.steps;
@@ -1220,7 +1248,7 @@ async function runImport(op, text, imgs, url, wall){
     try { image = await dataUrlToImages(site.image); } catch (e) {}
     if (stopped()) return;
   }
-  if (!image && imgs.length){ const shot = imgs[photoIndex(imgs)]; image = { full: shot.full, thumb: shot.thumb }; }
+  if (!image && imgs.length){ const shot = imgs[pickPhotoShot(imgs, ocrLen)]; image = { full: shot.full, thumb: shot.thumb }; }
   const hasBody = ingredients.length > 0 || steps.length > 0;
   const toEdit = notice => {
     closeSheet();
@@ -1470,7 +1498,7 @@ function openSettings(){
     relaySectionHTML() +
     (samples ? '<section class="set-sec"><h3>見本のレシピ</h3><p class="hint">見本が' + samples + '品入っています。自分のレシピを入れたら消してください。</p><button class="btn btn-block" data-act="del-samples">見本を消す</button></section>' : '') +
     (DB.mode === 'mem' ? '<p class="hint">この画面ではレシピを保存できません。</p>' : '') +
-    '<p class="ver">ぽじおレシピブック 試作版 v0.6</p>');
+    '<p class="ver">ぽじおレシピブック 試作版 v0.7</p>');
   const u = $('#usage');
   try {
     if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(e => { if (u) u.textContent = '約' + ((e.usage || 0) / 1048576).toFixed(1) + 'MB'; }).catch(() => { if (u) u.textContent = '不明'; });
@@ -1548,7 +1576,7 @@ const ACT = {
     if (!t.trim() && !S.addImgs.length){ toast('URLか文章を貼り付けるか、画像を選んでください'); return; }
     goParse(t, S.addImgs[0] || null);
   },
-  'add-img-del': el => { S.addImgs.splice(Number(el.dataset.i), 1); $('#add-imgs').innerHTML = addImgsHTML(); queueDraft(); },
+  'add-img-del': el => { S.addImgs.splice(Number(el.dataset.i), 1); const box = $('#add-imgs'); box.innerHTML = addImgsHTML(); box.hidden = !S.addImgs.length; queueDraft(); },
   'import-cancel': () => cancelImport(),
   'paste-url': async () => {
     const ta = $('#add-text');
@@ -1669,8 +1697,9 @@ document.addEventListener('change', async e => {
     } finally {
       if (gen === S.addGen){ S.preparing = Math.max(0, S.preparing - 1); setPrepState(); }
     }
-    const box = $('#add-imgs'); if (box) box.innerHTML = addImgsHTML();
+    const box = $('#add-imgs'); if (box){ box.innerHTML = addImgsHTML(); box.hidden = !S.addImgs.length; }
     queueDraft();
+    if (auto && S.addImgs.length && !S.importing && !S.preparing) autoImport();
     return;
   } else if (t.id === 'import-file'){
     await readBackup(file);

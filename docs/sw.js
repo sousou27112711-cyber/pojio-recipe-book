@@ -1,5 +1,5 @@
-// ぽじおレシピブック Service Worker(v0.6)。オフラインでも開けるよう、アプリ本体を端末に置いておく。
-const CACHE = 'pojio-v0.6';
+// ぽじおレシピブック Service Worker(v0.7)。オフラインでも開けるよう、アプリ本体を端末に置いておく。
+const CACHE = 'pojio-v0.7';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));

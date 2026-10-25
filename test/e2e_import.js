@@ -74,7 +74,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   // 3) 料理名と画像だけのサイト → URLを貼っただけで登録(材料と作り方は読めなかったと知らせる)
   await click('[data-act="add"]');
-  log.push('3) 追加画面: 主ボタン=' + await ev(`document.querySelector('[data-act="paste-url"]')?.textContent`) + ' / スクショ欄は閉じている=' + await ev(`!document.querySelector('#shot-box').open`));
+  log.push('3) 追加画面: ボタン=' + await ev(`document.querySelector('[data-act="paste-url"]')?.textContent`) + '・' + await ev(`document.querySelector('label[for="add-file"]')?.textContent`));
   await shot('31_add_url_first.png');
   await paste(siteUrl('sirogohan'));
   await waitFor(inDetail);
@@ -89,29 +89,37 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await sleep(1200);
   log.push('4) やめる: ' + await toastText() + ' / シートは開いたまま=' + await ev(`!document.querySelector('#sheet').hidden`) + ' / 件数 ' + await ev(`document.querySelector('#count').textContent`));
 
-  // 5) インスタのURLだけ → 案内。スクショ1枚 → 文字を読み取って自動登録
+  // 5) インスタのURLだけ → 案内
   await ev(`document.querySelector('#add-text').value=''`);
   await paste('https://www.instagram.com/p/ABC123/');
   await sleep(300);
-  log.push('5) インスタURLだけ: ' + await toastText() + ' / スクショ欄が開いた=' + await ev(`document.querySelector('#shot-box').open`));
-  await pickShots(1);
-  log.push('5) 追加画面の印: ' + await ev(`document.querySelector('#add-imgs .thumb-tag')?.textContent`));
-  await shot('21_add_shot.png');
-  await click('[data-act="add-go"]');
-  await waitFor(inDetail);
-  log.push('5) スクショから登録: ' + await detailSummary() + ' / 元リンク ' + await ev(`document.querySelector('.src-link')?.textContent`) + ' / ' + await toastText());
+  log.push('5) インスタURLだけ: ' + await toastText());
+  await click('[data-act="sheet-close"]');
+
+  // 6) 説明文のスクショ＋リールを止めたスクショを選ぶ → 選んだだけで取り込みが始まり、文字の少ない方が写真になる
+  await click('[data-act="add"]');
+  await shot('41_add_two_buttons.png');
+  {
+    const doc = await send('DOM.getDocument', { depth: -1 });
+    const q = await send('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector: '#add-file' });
+    await send('DOM.setFileInputFiles', { nodeId: q.result.nodeId, files: [path.join(path.dirname(SHOT), '3_caption_only.png'), path.join(path.dirname(SHOT), '4_reels.png')] });
+  }
+  await waitFor(inDetail, 15000);
+  log.push('6) スクショだけで登録: ' + await detailSummary() + ' / ' + await toastText());
   await sleep(500);
-  log.push('5) トップ画像: ' + await ev(`(()=>{const i=document.querySelector('#hero-img'); const c=document.createElement('canvas'); c.width=i.naturalWidth; c.height=i.naturalHeight; const g=c.getContext('2d'); g.drawImage(i,0,0); const p=g.getImageData(Math.round(c.width*0.05), Math.round(c.height*0.05), 1, 1).data; return i.naturalWidth+'x'+i.naturalHeight+' 左上の色 rgb('+p[0]+','+p[1]+','+p[2]+')';})()`));
-  await shot('22_imported_shot.png');
+  log.push('6) トップ画像: ' + await ev(`(()=>{const i=document.querySelector('#hero-img'); const c=document.createElement('canvas'); c.width=i.naturalWidth; c.height=i.naturalHeight; const g=c.getContext('2d'); g.drawImage(i,0,0); const p=g.getImageData(Math.round(c.width/2), Math.round(c.height/2), 1, 1).data; return i.naturalWidth+'x'+i.naturalHeight+' 真ん中の色 rgb('+p[0]+','+p[1]+','+p[2]+')';})()`));
+  await shot('42_imported_reels.png');
   await click('[data-act="back"]');
 
-  // 6) スクショ2枚で2枚目の読み取りが失敗 → 編集画面で確認
+  // 7) スクショ2枚で2枚目の読み取りが失敗 → 編集画面で確認
   await click('[data-act="add"]');
-  await pickShots(2);
-  await click('[data-act="add-go"]');
-  await waitFor(inEdit);
-  log.push('6) 読み取り失敗: ' + await ev(`document.querySelector('.edit .note').textContent`) + ' / 料理名=' + await ev(`document.querySelector('#f-title').value`));
-  await shot('23_ocr_failed.png');
+  {
+    const doc = await send('DOM.getDocument', { depth: -1 });
+    const q = await send('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector: '#add-file' });
+    await send('DOM.setFileInputFiles', { nodeId: q.result.nodeId, files: [SHOT, path.join(path.dirname(SHOT), 'fail.png')] });
+  }
+  await waitFor(inEdit, 15000);
+  log.push('7) 読み取り失敗: ' + await ev(`document.querySelector('.edit .note').textContent`) + ' / 料理名=' + await ev(`document.querySelector('#f-title').value`));
   await click('[data-act="edit-cancel"]');
 
   log.push('最終の件数: ' + await ev(`document.querySelector('#count').textContent`));
